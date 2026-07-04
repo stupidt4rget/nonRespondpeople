@@ -18,3 +18,9 @@
 - 更新 AGENTS.md 以符合现状：pnpm workspace 骨架已就绪、dev/typecheck/build 脚本可用、三包结构、shared 须先构建的依赖顺序说明。
 - 保留规则：小步开发、不提交密钥、不修改无关文件、不安装依赖除非批准、feature branch + PR、开发前确认当前分支、修改后运行 pnpm typecheck/build。
 - 未改动代码、package.json；未安装依赖；未提交 Git。
+
+## 2026-07-04 · 前端健康状态显示
+- apps/web/src/App.tsx：挂载时 fetch('/api/health')，显示项目名、连接状态(checking/connected/error)、后端 name、错误信息。
+- 复用 shared 现有 HealthResponse 类型，未改动 packages/shared。
+- 依赖 Vite proxy (/api → :3000)；未改后端、package.json；未装依赖。
+- 验证项：pnpm typecheck、pnpm build；实际执行后均通过，已通过 pnpm typecheck 与 pnpm build。
