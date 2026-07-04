@@ -1,12 +1,25 @@
 import Fastify from 'fastify';
 import { appName } from '@roleagent/shared';
-import type { HealthResponse } from '@roleagent/shared';
+import type { HealthResponse, DbHealthResponse } from '@roleagent/shared';
+import { prisma } from './db/prisma.js';
 
 const app = Fastify({ logger: true });
 
 app.get('/api/health', async () => {
   const body: HealthResponse = { status: 'ok', name: appName };
   return body;
+});
+
+app.get('/api/db-health', async () => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    const body: DbHealthResponse = { status: 'ok', database: 'sqlite' };
+    return body;
+  } catch (err) {
+    app.log.error(err);
+    const body: DbHealthResponse = { status: 'error', database: 'sqlite' };
+    return body;
+  }
 });
 
 const start = async () => {
