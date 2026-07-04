@@ -4,3 +4,8 @@ export interface HealthResponse {
   status: 'ok' | 'error';
   name: string;
 }
+
+export interface DbHealthResponse {
+  status: 'ok' | 'error';
+  database: string;
+}
