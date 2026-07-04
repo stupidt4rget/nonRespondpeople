@@ -9,3 +9,7 @@ build/
 data/
 *.db
 *.sqlite
+*.tsbuildinfo
+coverage/
+dist-ssr/
+.env.*.local
