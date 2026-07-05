@@ -32,7 +32,7 @@ export function CollapsibleSection({
         <span className="collapsible-meta">
           {badge}
           <span className="collapsible-chevron" aria-hidden="true">
-            {open ? 'Less' : 'More'}
+            {open ? '收起' : '展开'}
           </span>
         </span>
       </button>

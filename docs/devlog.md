@@ -106,3 +106,13 @@
 - README: added LLM Configuration section + import/chat endpoints in API table.
 - Verified: pnpm typecheck pass; pnpm build pass (35 modules). API tests: POST /import 201 with new fields; GET /:id returns new fields; PATCH persona 200; POST /chat no config 500; POST /chat nonexistent 404.
 - Untouched: apps/server/src/index.ts, apps/server/src/db/prisma.ts, package.json, pnpm-lock.yaml, AGENTS.md, tsconfig.base.json, pnpm-workspace.yaml; no Git commit.
+
+## 2026-07-05 - Worldbook + chat persistence + CN UI V0.8
+- Prisma: added WorldBook, CharacterWorldBook, Conversation, and ChatMessage models. Migration `20260705093000_add_worldbooks_chat_persistence` creates tables, indexes, cascade cleanup for character-bound conversation/message/binding data, and a ChatMessage role check limited to user/assistant.
+- Shared: added worldbook, conversation, chat message, character export, and worldbook binding DTO/request/response types. ChatResponse still keeps `reply` while adding saved message/conversation metadata.
+- Server: added `routes/worldbooks.ts` for list/import/export/delete worldbooks and character-worldbook bindings; added `routes/conversations.ts` for default per-character conversation loading and active worldbook multi-select updates.
+- Server chat: POST /api/chat now reads saved conversation history, injects all currently enabled worldbooks into the system prompt with length limits, calls the configured LLM, and only then saves user + assistant messages. Failed LLM calls do not save partial chat rows.
+- Character import/export: import now supports character_book from request or rawCardJson fallback and binds generated worldbooks to the imported character. Export returns JSON role card fields plus character_book when available; PNG re-encoding was intentionally deferred.
+- Web: main UI text is localized to Chinese. ChatPanel loads persisted conversation messages on character switch, updates from saved server messages after send, and keeps the composer fixed at the bottom.
+- Web: added WorldBookPanel for worldbook JSON import/export/delete and per-conversation enabled worldbook multi-select. Character detail includes JSON export.
+- Verified: Prisma migrate dev applied `add_worldbooks_chat_persistence`; Prisma Client generated; shared/server/web typecheck passed; server build passed; web Vite build passed. No new dependencies; no package/config changes; no Git commit.

@@ -66,6 +66,11 @@ export interface ChatRequest {
 
 export interface ChatResponse {
   reply: string;
+  conversation?: ConversationDto;
+  userMessage?: ChatMessageDto;
+  assistantMessage?: ChatMessageDto;
+  messages?: ChatMessageDto[];
+  activeWorldBookIds?: string[];
 }
 
 export interface LlmSettingsRequest {
@@ -91,6 +96,81 @@ export interface ImportCharacterCardRequest {
   messageExample?: string;
   systemPrompt?: string;
   rawCardJson?: string;
+  characterBook?: unknown;
 }
 
 export type ImportCharacterCardResponse = CharacterDto;
+
+export interface ExportCharacterCardResponse {
+  name: string;
+  description?: string;
+  persona?: string;
+  scenario?: string;
+  first_mes?: string;
+  mes_example?: string;
+  system_prompt?: string;
+  character_book?: unknown;
+}
+
+export interface WorldBookDto {
+  id: string;
+  name: string;
+  description: string | null;
+  entriesJson: string;
+  rawJson: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorldBooksResponse {
+  worldBooks: WorldBookDto[];
+}
+
+export interface ImportWorldBookRequest {
+  name?: string;
+  description?: string;
+  rawJson: unknown;
+}
+
+export interface DeleteWorldBookResponse {
+  ok: true;
+  id: string;
+}
+
+export interface CharacterWorldBooksResponse {
+  characterId: string;
+  worldBooks: WorldBookDto[];
+  worldBookIds: string[];
+}
+
+export interface UpdateCharacterWorldBooksRequest {
+  worldBookIds: string[];
+}
+
+export interface ConversationDto {
+  id: string;
+  characterId: string;
+  title: string | null;
+  activeWorldBookIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatMessageDto {
+  id: string;
+  conversationId: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: string;
+}
+
+export interface CharacterConversationResponse {
+  conversation: ConversationDto;
+  messages: ChatMessageDto[];
+  worldBooks: WorldBookDto[];
+  activeWorldBookIds: string[];
+}
+
+export interface UpdateConversationWorldBooksRequest {
+  worldBookIds: string[];
+}

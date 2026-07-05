@@ -16,3 +16,9 @@
 - [ ] Business features (later phases): roles, chat, worldbook, model config.
 - [ ] CI workflow + pre-commit hooks.
 - [ ] Test runner + fixtures.
+
+## V0.8 follow-up notes
+- [x] Worldbook + chat persistence V0.8: persisted per-character default conversations, saved chat messages, worldbook import/export, role-card JSON export, character_book auto-binding, and Chinese UI.
+- [ ] Later: multiple conversation UI per character.
+- [ ] Later: advanced worldbook trigger rules, priorities, and scan depth.
+- [ ] Later: PNG character card re-export.

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import type { CharacterDto } from '@roleagent/shared';
-import { updateCharacter, deleteCharacter } from '../api';
+import { updateCharacter, deleteCharacter, exportCharacterCard } from '../api';
 
 interface CharacterDetailProps {
   character: CharacterDto;
@@ -27,13 +27,14 @@ export function CharacterDetail({
   );
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [textExpanded, setTextExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
     if (!editName.trim()) {
-      setError('name must not be empty');
+      setError('名称不能为空');
       return;
     }
     setError(null);
@@ -52,7 +53,7 @@ export function CharacterDetail({
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(`Delete character "${character.name}"?`)) {
+    if (!window.confirm(`确定删除角色“${character.name}”？`)) {
       return;
     }
     setError(null);
@@ -67,40 +68,69 @@ export function CharacterDetail({
     }
   };
 
+  const handleExport = async () => {
+    setError(null);
+    setExporting(true);
+    try {
+      const data = await exportCharacterCard(character.id);
+      const blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${character.name || 'character'}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <section className="character-detail-panel">
       <header className="detail-drawer-header">
         <div>
-          <p className="eyebrow">Character detail</p>
+          <p className="eyebrow">角色详情</p>
           <h2>{character.name}</h2>
           <p className="panel-subtitle">
-            {character.description ?? 'No description has been written yet.'}
+            {character.description ?? '暂无角色简介。'}
           </p>
         </div>
         <div className="meta-stack">
-          <span>Created {formatDate(character.createdAt)}</span>
-          <span>Updated {formatDate(character.updatedAt)}</span>
+          <span>创建于 {formatDate(character.createdAt)}</span>
+          <span>更新于 {formatDate(character.updatedAt)}</span>
         </div>
       </header>
 
       <form className="edit-panel" onSubmit={handleSave}>
         <div className="section-heading section-heading--row">
           <div>
-            <p className="eyebrow">Manage</p>
-            <h3>Edit character</h3>
+            <p className="eyebrow">管理</p>
+            <h3>编辑角色</h3>
           </div>
+          <button
+            className="button button--secondary"
+            type="button"
+            onClick={handleExport}
+            disabled={exporting || editing || deleting}
+          >
+            {exporting ? '导出中...' : '导出角色'}
+          </button>
           <button
             className="button button--danger"
             type="button"
             onClick={handleDelete}
             disabled={editing || deleting}
           >
-            {deleting ? 'Deleting...' : 'Delete character'}
+            {deleting ? '删除中...' : '删除角色'}
           </button>
         </div>
         <div className="edit-grid">
           <label className="field">
-            <span>Name</span>
+            <span>名称</span>
             <input
               type="text"
               value={editName}
@@ -109,7 +139,7 @@ export function CharacterDetail({
             />
           </label>
           <label className="field">
-            <span>Description</span>
+            <span>简介</span>
             <textarea
               value={editDescription}
               onChange={(e) => setEditDescription(e.target.value)}
@@ -120,7 +150,7 @@ export function CharacterDetail({
         </div>
         <div className="action-row">
           <button className="button button--primary" type="submit" disabled={editing || deleting}>
-            {editing ? 'Saving...' : 'Save changes'}
+            {editing ? '保存中...' : '保存修改'}
           </button>
         </div>
         {error !== null && <p className="notice notice--error">{error}</p>}
@@ -128,23 +158,23 @@ export function CharacterDetail({
 
       <div className={`detail-grid${textExpanded ? ' detail-grid--expanded' : ''}`}>
         <section className="detail-card">
-          <h3>Persona</h3>
-          <p className="detail-text">{character.persona ?? 'No persona notes yet.'}</p>
+          <h3>人格</h3>
+          <p className="detail-text">{character.persona ?? '暂无人格设定。'}</p>
         </section>
         <section className="detail-card">
-          <h3>Scenario</h3>
-          <p className="detail-text">{character.scenario ?? 'No scenario has been set.'}</p>
+          <h3>场景</h3>
+          <p className="detail-text">{character.scenario ?? '暂无场景设定。'}</p>
         </section>
         <section className="detail-card">
-          <h3>First message</h3>
+          <h3>开场白</h3>
           <p className="detail-text">
-            {character.firstMessage ?? 'No opening message configured.'}
+            {character.firstMessage ?? '暂无开场白。'}
           </p>
         </section>
         <section className="detail-card">
-          <h3>System prompt</h3>
+          <h3>系统提示</h3>
           <p className="detail-text">
-            {character.systemPrompt ?? 'No system prompt configured.'}
+            {character.systemPrompt ?? '暂无系统提示。'}
           </p>
         </section>
       </div>
@@ -155,7 +185,7 @@ export function CharacterDetail({
           type="button"
           onClick={() => setTextExpanded((prev) => !prev)}
         >
-          {textExpanded ? 'Show less' : 'Show more'}
+          {textExpanded ? '收起' : '展开更多'}
         </button>
       </div>
     </section>

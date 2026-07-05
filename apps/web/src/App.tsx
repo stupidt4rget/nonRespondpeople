@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { appName } from '@roleagent/shared';
 import type { HealthResponse, CharacterDto } from '@roleagent/shared';
 import { fetchCharacters, createCharacter } from './api';
@@ -7,6 +7,7 @@ import { ChatPanel } from './components/ChatPanel';
 import { CharacterImport } from './components/CharacterImport';
 import { LlmSettings } from './components/LlmSettings';
 import { CollapsibleSection } from './components/CollapsibleSection';
+import { WorldBookPanel } from './components/WorldBookPanel';
 import './App.css';
 
 type ConnectionState = 'checking' | 'connected' | 'error';
@@ -17,6 +18,12 @@ function formatDate(value: string): string {
     return value;
   }
   return date.toLocaleString();
+}
+
+function formatConnectionState(value: ConnectionState): string {
+  if (value === 'checking') return '检查中';
+  if (value === 'connected') return '已连接';
+  return '错误';
 }
 
 export function App() {
@@ -36,6 +43,9 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [activeWorldBookIds, setActiveWorldBookIds] = useState<string[]>([]);
+  const [worldBookRefreshKey, setWorldBookRefreshKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,7 +92,7 @@ export function App() {
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
-      setFormError('name must not be empty');
+      setFormError('名称不能为空');
       return;
     }
     setFormError(null);
@@ -95,6 +105,8 @@ export function App() {
       setCharacters((prev) => [created, ...prev]);
       setSelectedId(created.id);
       setDetailOpen(false);
+      setConversationId(null);
+      setActiveWorldBookIds([]);
       setName('');
       setDescription('');
     } catch (err: unknown) {
@@ -114,32 +126,45 @@ export function App() {
     setCharacters((prev) => [created, ...prev]);
     setSelectedId(created.id);
     setDetailOpen(false);
+    setConversationId(null);
+    setActiveWorldBookIds([]);
+    setWorldBookRefreshKey((prev) => prev + 1);
   };
 
   const handleDeleted = (id: string) => {
     setCharacters((prev) => prev.filter((c) => c.id !== id));
     setSelectedId(null);
     setDetailOpen(false);
+    setConversationId(null);
+    setActiveWorldBookIds([]);
   };
 
   const selected = characters.find((c) => c.id === selectedId) ?? null;
 
+  const handleConversationReady = useCallback(
+    (nextConversationId: string, nextActiveWorldBookIds: string[]) => {
+      setConversationId(nextConversationId);
+      setActiveWorldBookIds(nextActiveWorldBookIds);
+    },
+    [],
+  );
+
   return (
     <main className={`app-shell${sidebarCollapsed ? ' app-shell--sidebar-collapsed' : ''}`}>
-      <aside className="app-sidebar" aria-label="Character controls">
+      <aside className="app-sidebar" aria-label="角色控制">
         <header className="brand-panel">
           <button
             className="sidebar-toggle"
             type="button"
             onClick={() => setSidebarCollapsed((prev) => !prev)}
-            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
             aria-expanded={!sidebarCollapsed}
           >
-            {sidebarCollapsed ? 'Open' : 'Hide'}
+            {sidebarCollapsed ? '展开' : '隐藏'}
           </button>
           {!sidebarCollapsed && (
             <div>
-              <p className="eyebrow">Local workspace</p>
+              <p className="eyebrow">本地工作区</p>
               <h1>{appName}</h1>
             </div>
           )}
@@ -147,8 +172,8 @@ export function App() {
             <span className="status-dot" aria-hidden="true" />
             {!sidebarCollapsed && (
               <div>
-                <span className="status-label">Backend</span>
-                <strong>{state}</strong>
+                <span className="status-label">后端</span>
+                <strong>{formatConnectionState(state)}</strong>
                 {backendName !== null && <small>{backendName}</small>}
                 {state === 'error' && error !== null && <small>{error}</small>}
               </div>
@@ -164,19 +189,19 @@ export function App() {
         ) : (
           <>
             <CollapsibleSection
-              title="Characters"
-              eyebrow="Cast"
+              title="角色"
+              eyebrow="角色列表"
               badge={<span className="count-pill">{characters.length}</span>}
               defaultOpen
             >
               <section className="character-list-panel">
-              {loading && <p className="empty-state">Loading characters...</p>}
+              {loading && <p className="empty-state">正在加载角色...</p>}
               {listError !== null && (
-                <p className="notice notice--error">Failed to load list: {listError}</p>
+                <p className="notice notice--error">角色列表加载失败：{listError}</p>
               )}
               {!loading && listError === null && characters.length === 0 && (
                 <p className="empty-state">
-                  No characters yet. Create one or import a card to begin.
+                  暂无角色。可以创建角色或导入角色卡开始。
                 </p>
               )}
               {characters.length > 0 && (
@@ -193,12 +218,14 @@ export function App() {
                         onClick={() => {
                           setSelectedId(c.id);
                           setDetailOpen(false);
+                          setConversationId(null);
+                          setActiveWorldBookIds([]);
                         }}
                         aria-pressed={selectedCharacter}
                       >
                         <span className="character-list-name">{c.name}</span>
                         <span className="character-list-description">
-                          {c.description ?? 'No description yet'}
+                          {c.description ?? '暂无简介'}
                         </span>
                         <span className="character-list-date">{formatDate(c.createdAt)}</span>
                       </button>
@@ -210,43 +237,58 @@ export function App() {
             </CollapsibleSection>
 
             <CollapsibleSection
-              title="LLM Settings"
+              title="模型设置"
               eyebrow="API"
               defaultOpen={false}
             >
               <LlmSettings />
             </CollapsibleSection>
 
-            <CollapsibleSection title="Create Character" eyebrow="Quick start">
+            <CollapsibleSection
+              title="世界书"
+              eyebrow="上下文"
+              badge={<span className="count-pill">{activeWorldBookIds.length}</span>}
+            >
+              <WorldBookPanel
+                character={selected}
+                conversationId={conversationId}
+                activeWorldBookIds={activeWorldBookIds}
+                refreshKey={worldBookRefreshKey}
+                onConversationReady={handleConversationReady}
+                onActiveWorldBooksChange={setActiveWorldBookIds}
+              />
+            </CollapsibleSection>
+
+            <CollapsibleSection title="创建角色" eyebrow="快速开始">
               <form className="stacked-form" onSubmit={handleCreate}>
                 <label className="field">
-                  <span>Name</span>
+                  <span>名称</span>
                   <input
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     disabled={submitting}
-                    placeholder="A tavern regular"
+                    placeholder="酒馆里的新角色"
                   />
                 </label>
                 <label className="field">
-                  <span>Description</span>
+                  <span>简介</span>
                   <textarea
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     disabled={submitting}
-                    placeholder="What should others know about them?"
+                    placeholder="这个角色有什么特点？"
                     rows={3}
                   />
                 </label>
                 <button className="button button--primary" type="submit" disabled={submitting}>
-                  {submitting ? 'Creating...' : 'Create character'}
+                  {submitting ? '创建中...' : '创建角色'}
                 </button>
                 {formError !== null && <p className="notice notice--error">{formError}</p>}
               </form>
             </CollapsibleSection>
 
-            <CollapsibleSection title="Import Character" eyebrow="Card import">
+            <CollapsibleSection title="导入角色" eyebrow="角色卡">
               <CharacterImport onImported={handleImported} />
             </CollapsibleSection>
           </>
@@ -260,6 +302,8 @@ export function App() {
             character={selected}
             detailOpen={detailOpen}
             onToggleDetail={() => setDetailOpen((prev) => !prev)}
+            activeWorldBookCount={activeWorldBookIds.length}
+            onConversationReady={handleConversationReady}
             detailSlot={
               <CharacterDetail
                 key={selected.id}
@@ -271,11 +315,10 @@ export function App() {
           />
         ) : (
           <section className="workspace-empty">
-            <p className="eyebrow">Ready when you are</p>
-            <h2>Select a character</h2>
+            <p className="eyebrow">准备就绪</p>
+            <h2>选择一个角色</h2>
             <p>
-              Choose someone from the left, create a new character, or import a character card
-              to open their details and start chatting.
+              从左侧选择角色，或创建/导入角色卡，然后开始聊天。
             </p>
           </section>
         )}

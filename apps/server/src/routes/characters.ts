@@ -7,8 +7,13 @@ import type {
   UpdateCharacterRequest,
   DeleteCharacterResponse,
   ImportCharacterCardRequest,
+  ExportCharacterCardResponse,
 } from '@roleagent/shared';
 import { prisma } from '../db/prisma.js';
+import {
+  createWorldBookFromCharacterBook,
+  extractCharacterBookFromCard,
+} from './worldbooks.js';
 
 function toCharacterDto(character: Character): CharacterDto {
   return {
@@ -36,6 +41,15 @@ function isPlainObject(value: unknown): value is object {
 
 function strOrNull(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
+}
+
+function parseJson(value: string | null | undefined): unknown | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 const OPTIONAL_CARD_FIELDS = [
@@ -105,7 +119,48 @@ export async function characterRoutes(app: FastifyInstance) {
         rawCardJson: strOrNull(body.rawCardJson),
       },
     });
+
+    const rawCard = parseJson(body.rawCardJson);
+    const characterBook =
+      body.characterBook ?? extractCharacterBookFromCard(rawCard);
+    if (characterBook !== null && characterBook !== undefined) {
+      await createWorldBookFromCharacterBook({
+        characterId: created.id,
+        characterName: created.name,
+        characterBook,
+      });
+    }
+
     return reply.code(201).send(toCharacterDto(created));
+  });
+
+  app.get('/api/characters/:id/export', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const found = await prisma.character.findUnique({ where: { id } });
+    if (!found) {
+      return reply.code(404).send({ error: 'character not found' });
+    }
+
+    const linkedWorldBook = await prisma.characterWorldBook.findFirst({
+      where: { characterId: id, isDefault: true },
+      include: { worldBook: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    const rawCard = parseJson(found.rawCardJson);
+    const rawCharacterBook = extractCharacterBookFromCard(rawCard);
+    const linkedRawBook = parseJson(linkedWorldBook?.worldBook.rawJson);
+
+    const body: ExportCharacterCardResponse = {
+      name: found.name,
+      description: found.description ?? undefined,
+      persona: found.persona ?? undefined,
+      scenario: found.scenario ?? undefined,
+      first_mes: found.firstMessage ?? undefined,
+      mes_example: found.messageExample ?? undefined,
+      system_prompt: found.systemPrompt ?? undefined,
+      character_book: rawCharacterBook ?? linkedRawBook ?? undefined,
+    };
+    return reply.send(body);
   });
 
   app.get('/api/characters/:id', async (req, reply) => {

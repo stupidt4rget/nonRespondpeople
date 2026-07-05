@@ -7,12 +7,12 @@ const DEFAULT_MODEL = 'glm-5.2';
 
 function getStatusText(status: LlmSettingsStatusResponse | null): string {
   if (!status) {
-    return 'Checking';
+    return '检查中';
   }
   if (!status.configured) {
-    return 'Not configured';
+    return '未配置';
   }
-  return status.source === 'env' ? 'Configured from env' : 'Configured';
+  return status.source === 'env' ? '环境变量已配置' : '已配置';
 }
 
 export function LlmSettings() {
@@ -51,15 +51,15 @@ export function LlmSettings() {
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
     if (!baseUrl.trim()) {
-      setError('baseUrl must not be empty');
+      setError('API Base URL 不能为空');
       return;
     }
     if (!model.trim()) {
-      setError('model must not be empty');
+      setError('模型不能为空');
       return;
     }
     if (!apiKey.trim()) {
-      setError('apiKey must not be empty');
+      setError('API Key 不能为空');
       return;
     }
 
@@ -76,7 +76,7 @@ export function LlmSettings() {
       setBaseUrl(res.baseUrl ?? baseUrl.trim());
       setModel(res.model ?? model.trim());
       setApiKey('');
-      setSuccess('Settings saved for this server session.');
+      setSuccess('模型设置已保存到当前后端进程。');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -89,20 +89,20 @@ export function LlmSettings() {
       <div className="section-heading section-heading--row">
         <div>
           <p className="eyebrow">LLM API</p>
-          <h2>Settings</h2>
+          <h2>模型设置</h2>
         </div>
         <span
           className={`settings-status${
             status?.configured ? ' settings-status--configured' : ''
           }`}
         >
-          {loading ? 'Checking' : getStatusText(status)}
+          {loading ? '检查中' : getStatusText(status)}
         </span>
       </div>
 
       {status?.configured && (
         <p className="secret-hint">
-          API Key: {status.hasApiKey ? 'configured' : 'not configured'}
+          API Key：{status.hasApiKey ? '已配置' : '未配置'}
         </p>
       )}
 
@@ -118,7 +118,7 @@ export function LlmSettings() {
           />
         </label>
         <label className="field">
-          <span>Model</span>
+          <span>模型</span>
           <input
             type="text"
             value={model}
@@ -134,12 +134,12 @@ export function LlmSettings() {
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             disabled={loading || saving}
-            placeholder="your api key"
+            placeholder="你的 API Key"
             autoComplete="off"
           />
         </label>
         <button className="button button--primary" type="submit" disabled={loading || saving}>
-          {saving ? 'Saving...' : 'Save settings'}
+          {saving ? '保存中...' : '保存设置'}
         </button>
         {success !== null && <p className="notice notice--success">{success}</p>}
         {error !== null && <p className="notice notice--error">{error}</p>}
