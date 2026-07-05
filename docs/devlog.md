@@ -1,4 +1,4 @@
-﻿# Devlog
+# Devlog
 
 ## 2026-07-04
 - Initialized pnpm workspace monorepo skeleton.
@@ -70,3 +70,15 @@
 - Updated `docs/todo.md`: checked off `Prisma: document pnpm install + db:generate fresh-clone step in README / CI.` Other routing/app shell/API client todos remain unchecked.
 - Untouched: apps/, packages/, package.json, pnpm-lock.yaml, AGENTS.md, tsconfig.base.json, pnpm-workspace.yaml; no new files; no deps installed; no commands run; no Git commit. Doc-only changes, no typecheck/build needed.
 - Encoding fix: rewrote README.md and this devlog entry in ASCII English to avoid mojibake under GBK viewers. Replaced non-ASCII punctuation in docs/todo.md with plain ASCII characters.
+
+## 2026-07-05 - Character management V0.2
+- Added 3 backend routes in apps/server/src/routes/characters.ts: GET /api/characters/:id (404 if not found), PATCH /api/characters/:id (update name/description; 400 on empty name / no fields / bad types; 404 if not found), DELETE /api/characters/:id (returns {ok:true,id}; 404 if not found). Kept existing GET list and POST.
+- Body validation: added isPlainObject guard (rejects null/array/non-object) for both POST and PATCH before destructuring fields. No zod, no any; uses type narrowing on each field. PATCH description semantics: undefined = leave unchanged, null = clear, string = set.
+- 404 handling: findUnique before update/delete; null result returns 404 {error} so Prisma NotFound exceptions never reach the client. PATCH validates body (400) before checking existence (404).
+- packages/shared/src/index.ts: added UpdateCharacterRequest {name?; description?: string | null} and DeleteCharacterResponse {ok: true; id: string}. GET /:id and PATCH responses reuse CharacterDto directly.
+- apps/web/src/api.ts: extracted throwApiError(res) helper (default HTTP {status}; try parse JSON {error?}; catch falls back to HTTP status). Refactored existing fetchCharacters/createCharacter to use it. Added fetchCharacter(id), updateCharacter(id, body), deleteCharacter(id).
+- New apps/web/src/components/CharacterDetail.tsx: shows id/name/description/createdAt/updatedAt; edit form (name required, description optional); Save calls PATCH; Delete calls DELETE with window.confirm. Internal state resets via key={character.id} from parent.
+- apps/web/src/App.tsx: added selectedId state; list items are clickable buttons (selected one bold); renders CharacterDetail when selected, else a placeholder. onUpdated replaces the list item; onDeleted removes it and clears selection. Converted all user-visible UI text from Chinese to English (Loading..., No characters yet, no description, name must not be empty, etc.).
+- No schema change, no migration, no new deps.
+- Verified: pnpm typecheck pass; pnpm build pass (33 modules). pnpm dev API tests: GET /:id 200/404, PATCH name/description/null 200, PATCH empty name/no fields/nonexistent 400/400/404, DELETE 200/404, POST non-object body 400. All passed.
+- Untouched: apps/server/prisma, apps/server/src/index.ts, package.json, pnpm-lock.yaml, AGENTS.md, tsconfig.base.json, pnpm-workspace.yaml; no Git commit.

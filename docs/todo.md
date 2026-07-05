@@ -10,6 +10,7 @@
 - [ ] Server: config + additional endpoints beyond /api/health.
 - [ ] Web: app shell, routing, API client.
 - [x] Web: minimal Character list and create form. (2026-07-05)
+- [x] Character management V0.2: detail, update, delete APIs and web UI. (2026-07-05)
 - [ ] Business features (later phases): roles, chat, worldbook, model config.
 - [ ] CI workflow + pre-commit hooks.
 - [ ] Test runner + fixtures.

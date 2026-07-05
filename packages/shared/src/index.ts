@@ -26,3 +26,13 @@ export interface CreateCharacterRequest {
 export interface CharactersResponse {
   characters: CharacterDto[];
 }
+
+export interface UpdateCharacterRequest {
+  name?: string;
+  description?: string | null;
+}
+
+export interface DeleteCharacterResponse {
+  ok: true;
+  id: string;
+}

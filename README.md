@@ -11,6 +11,7 @@ A tavern-style roleplay agent tool. This repo is currently at stage V0.1: Prisma
 - `POST /api/characters` - create a character
 - Minimal web character list (http://localhost:5173)
 - Minimal web create form
+- Character detail view, edit, and delete (select a character in the list)
 
 ## Not Implemented Yet
 
@@ -145,6 +146,9 @@ node apps/server/dist/index.js
 | GET | `/api/db-health` | Database connectivity check, returns `{status, database}` |
 | GET | `/api/characters` | Return character list, sorted by `createdAt desc` |
 | POST | `/api/characters` | Create a character, body `{name, description?}`, returns 201 with the created item; empty name returns 400 |
+| GET | `/api/characters/:id` | Return a single character; 404 if not found |
+| PATCH | `/api/characters/:id` | Update a character, body `{name?, description?}` (`description: null` clears it); 400 on empty name / no fields; 404 if not found |
+| DELETE | `/api/characters/:id` | Delete a character, returns `{ok, id}`; 404 if not found |
 
 Examples:
 
