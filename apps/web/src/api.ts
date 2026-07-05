@@ -6,6 +6,7 @@
   DeleteCharacterResponse,
   ChatRequest,
   ChatResponse,
+  ImportCharacterCardRequest,
 } from '@roleagent/shared';
 
 async function throwApiError(res: Response): Promise<never> {
@@ -34,6 +35,20 @@ export async function createCharacter(
   body: CreateCharacterRequest,
 ): Promise<CharacterDto> {
   const res = await fetch('/api/characters', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as CharacterDto;
+}
+
+export async function importCharacterCard(
+  body: ImportCharacterCardRequest,
+): Promise<CharacterDto> {
+  const res = await fetch('/api/characters/import', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import type { CharacterDto } from '@roleagent/shared';
+import type { CharacterDto, ChatHistoryMessage } from '@roleagent/shared';
 import { sendChat } from '../api';
 
 interface ChatMessage {
@@ -13,7 +13,18 @@ interface ChatPanelProps {
 }
 
 export function ChatPanel({ character }: ChatPanelProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    if (character.firstMessage) {
+      return [
+        {
+          role: 'assistant',
+          content: character.firstMessage,
+          createdAt: new Date().toISOString(),
+        },
+      ];
+    }
+    return [];
+  });
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +46,15 @@ export function ChatPanel({ character }: ChatPanelProps) {
     setInput('');
     setSending(true);
     try {
-      const res = await sendChat({ characterId: character.id, message: text });
+      const history: ChatHistoryMessage[] = messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
+      const res = await sendChat({
+        characterId: character.id,
+        message: text,
+        history,
+      });
       const assistantMsg: ChatMessage = {
         role: 'assistant',
         content: res.reply,

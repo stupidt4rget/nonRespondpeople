@@ -1,24 +1,24 @@
 # RoleAgent Tavern
 
-A tavern-style roleplay agent tool. This repo is currently at stage V0.1: Prisma + SQLite persistence is wired up, the first business model Character is implemented with a minimal backend API, and a minimal web page (character list + create form) is provided for validation. Chat, worldbook, model config, and character card editor are not implemented yet.
+A tavern-style roleplay agent tool. This repo is currently at stage V0.4: Prisma + SQLite persistence, Character CRUD, character card import (JSON/PNG), and real LLM chat via OpenAI-compatible API are implemented. Worldbook, model config UI, and character card editor are not implemented yet.
 
-## Current Features (V0.1)
+## Current Features (V0.4)
 
 - Health status: `GET /api/health`, `GET /api/db-health`
 - Prisma 6 + SQLite persistence (local `dev.db` file)
-- Character model (id, name, description, createdAt, updatedAt)
-- `GET /api/characters` - return character list sorted by createdAt desc
-- `POST /api/characters` - create a character
-- Minimal web character list (http://localhost:5173)
-- Minimal web create form
-- Character detail view, edit, and delete (select a character in the list)
+- Character model with card fields (persona, scenario, firstMessage, messageExample, systemPrompt, rawCardJson)
+- Character CRUD: list, create, get by id, update, delete
+- Character card import (JSON and SillyTavern PNG)
+- Real LLM chat via OpenAI-compatible API (server-side config)
+- Minimal web UI: character list, create form, detail/edit, chat panel, import
 
 ## Not Implemented Yet
 
-- Chat
 - Worldbook
-- Model config
+- Model config UI
 - Character card editor
+- Chat history persistence
+- Streaming output
 
 ## Tech Stack
 
@@ -38,9 +38,13 @@ RoleAgent Tavern/
 |   |-- web/                # React + Vite frontend
 |   |   |-- src/
 |   |   |   |-- App.tsx
-|   |   |   |-- api.ts      # Character API call wrappers
+|   |   |   |-- api.ts      # API call wrappers
 |   |   |   |-- main.tsx
-|   |   |   `-- vite-env.d.ts
+|   |   |   |-- vite-env.d.ts
+|   |   |   `-- components/
+|   |   |       |-- CharacterDetail.tsx
+|   |   |       |-- CharacterImport.tsx
+|   |   |       `-- ChatPanel.tsx
 |   |   |-- index.html
 |   |   |-- vite.config.ts
 |   |   `-- tsconfig.json
@@ -51,7 +55,9 @@ RoleAgent Tavern/
 |       |-- src/
 |       |   |-- index.ts
 |       |   |-- db/prisma.ts
-|       |   `-- routes/characters.ts
+|       |   `-- routes/
+|       |       |-- characters.ts
+|       |       `-- chat.ts
 |       `-- tsconfig.json
 |-- packages/
 |   `-- shared/             # shared types (builds to dist, used by apps)
@@ -101,7 +107,7 @@ pnpm dev
 ```
 
 - `db:generate`: generates the Prisma Client; apps depend on its types and runtime.
-- `migrate dev`: applies existing migrations (`add_character_model`) and creates tables in `apps/server/prisma/dev.db`.
+- `migrate dev`: applies existing migrations and creates tables in `apps/server/prisma/dev.db`.
 - Both commands need `DATABASE_URL`; here it is injected via a PowerShell temporary env var, without writing `.env`.
 
 > Bash users: replace `$env:DATABASE_URL="file:./dev.db"; pnpm ...` with `DATABASE_URL="file:./dev.db" pnpm ...`.
@@ -116,7 +122,7 @@ This first builds `packages/shared`, then starts in parallel:
 - Frontend page: http://localhost:5173 (Vite, proxies `/api` to the backend)
 - Backend API: http://localhost:3000
 
-Open http://localhost:5173 to see: backend connection status, character list, character create form.
+Open http://localhost:5173 to see: backend connection status, character list, create form, import, detail/edit, and chat.
 
 ## Type Check
 
@@ -145,10 +151,12 @@ node apps/server/dist/index.js
 | GET | `/api/health` | Backend liveness check, returns `{status, name}` |
 | GET | `/api/db-health` | Database connectivity check, returns `{status, database}` |
 | GET | `/api/characters` | Return character list, sorted by `createdAt desc` |
-| POST | `/api/characters` | Create a character, body `{name, description?}`, returns 201 with the created item; empty name returns 400 |
+| POST | `/api/characters` | Create a character, body `{name, description?, persona?, ...}`, returns 201; empty name returns 400 |
+| POST | `/api/characters/import` | Import a character card, body `{name, description?, persona?, scenario?, firstMessage?, ...}`, returns 201 |
 | GET | `/api/characters/:id` | Return a single character; 404 if not found |
-| PATCH | `/api/characters/:id` | Update a character, body `{name?, description?}` (`description: null` clears it); 400 on empty name / no fields; 404 if not found |
+| PATCH | `/api/characters/:id` | Update a character (`null` clears a field); 400 on empty name / no fields; 404 if not found |
 | DELETE | `/api/characters/:id` | Delete a character, returns `{ok, id}`; 404 if not found |
+| POST | `/api/chat` | Send a chat message, body `{characterId, message, history?}`; returns `{reply}`; 500 if LLM not configured; 404 if character not found |
 
 Examples:
 
@@ -173,6 +181,30 @@ POST http://localhost:3000/api/characters
 Content-Type: application/json
 
 { "name": "Aria", "description": "test" }
+```
+
+## LLM Configuration
+
+The chat feature calls an OpenAI-compatible API. Configure these server-side environment variables (never commit real keys):
+
+```
+LLM_API_BASE_URL=https://ark.cn-beijing.volces.com/api/coding/v3
+LLM_API_KEY=your-api-key
+LLM_MODEL=GLM5.2
+```
+
+- These are read only on the server (`apps/server/src/routes/chat.ts`); they never reach the frontend or database.
+- The final request URL is `{LLM_API_BASE_URL}/chat/completions` (trailing slashes on the base URL are stripped automatically).
+- If any variable is missing, `POST /api/chat` returns 500 with `"LLM is not configured on the server"`.
+
+Local PowerShell startup (use your own key):
+
+```powershell
+$env:DATABASE_URL="file:./dev.db"
+$env:LLM_API_BASE_URL="https://ark.cn-beijing.volces.com/api/coding/v3"
+$env:LLM_API_KEY="your-api-key"
+$env:LLM_MODEL="GLM5.2"
+pnpm dev
 ```
 
 ## Git Branch Rules
