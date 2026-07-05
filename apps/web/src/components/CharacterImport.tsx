@@ -118,18 +118,23 @@ export function CharacterImport({ onImported }: CharacterImportProps) {
   };
 
   return (
-    <section>
-      <h2>Import Character Card</h2>
-      <p>Supports JSON and SillyTavern PNG cards.</p>
-      <input
-        type="file"
-        accept=".json,.png"
-        onChange={handleFile}
-        disabled={importing}
-      />
-      {importing && <p>Importing...</p>}
-      {error !== null && <p style={{ color: 'red' }}>{error}</p>}
-      {success !== null && <p style={{ color: 'green' }}>{success}</p>}
+    <section className="sidebar-panel import-panel">
+      <div className="section-heading">
+        <p className="eyebrow">Card import</p>
+        <h2>Import Character</h2>
+      </div>
+      <label className={`import-dropzone${importing ? ' import-dropzone--busy' : ''}`}>
+        <input
+          type="file"
+          accept=".json,.png"
+          onChange={handleFile}
+          disabled={importing}
+        />
+        <span>{importing ? 'Importing...' : 'Choose JSON or PNG card'}</span>
+        <small>SillyTavern character cards are supported.</small>
+      </label>
+      {error !== null && <p className="notice notice--error">{error}</p>}
+      {success !== null && <p className="notice notice--success">{success}</p>}
     </section>
   );
 }
