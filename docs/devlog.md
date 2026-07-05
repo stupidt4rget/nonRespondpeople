@@ -52,3 +52,16 @@
 - 验证：`pnpm typecheck` 通过；`pnpm build` 通过（server tsc + web vite build 均 Done）。
 - `pnpm dev` 后实测：`GET /api/health` → `{"status":"ok","name":"RoleAgent Tavern"}`；`GET /api/db-health` → `{"status":"ok","database":"sqlite"}`；`GET /api/characters` 空列表 → `{"characters":[]}`；`POST /api/characters`（`{"name":"Aria","description":"Test role"}`）→ 201，返回 `{id,name,description,createdAt:"2026-07-05T06:16:33.007Z",updatedAt:"..."}`（ISO 字符串，mapper 生效）；再次 GET 列表含该条；`POST` 传 `{"name":"   "}` → 400 `{"error":"name is required and must be a non-empty string"}`。
 - 未改动：apps/web、AGENTS.md、根 package.json、tsconfig.base.json、pnpm-workspace.yaml、pnpm-lock.yaml；未安装新依赖；未创建真实 .env；未提交 Git；未实现聊天/世界书/模型调用/鉴权。`dev.db` 落点 `apps/server/prisma/dev.db`（`*.db` 已 gitignore）。
+
+## 2026-07-05 · Character Web 最小页面
+- 新增 `apps/web/src/api.ts`：封装两个 fetch 调用，复用 `@roleagent/shared` 的 `CharacterDto` / `CharactersResponse` / `CreateCharacterRequest`（全部 `import type`）。
+  - `fetchCharacters()`：`GET /api/characters`，`res.ok` 否则抛 `HTTP {status}`，返回 `data.characters`。
+  - `createCharacter(body)`：`POST /api/characters`，`Content-Type: application/json`。失败时错误解析容错——先设默认 message `HTTP {status}`，`try` 里 `await res.json() as { error?: unknown }`，若 `err.error` 是 string 则覆盖 message；`catch` 忽略解析失败（响应体非 JSON 时回退到 HTTP 状态码）；最后统一 `throw new Error(message)`。不引入 `any`，用 `unknown` + `typeof` 收窄。
+- 修改 `apps/web/src/App.tsx`：保留原有 health 检测 `useEffect` 与显示（`state`/`backendName`/`error` 完全不动）。
+  - 新增第二个 `useEffect` 挂载时调 `fetchCharacters()`，带 `cancelled` 防泄漏，`loading`/`listError`/`characters` 三个 state。
+  - 新增创建表单：`name`（text input，必填）、`description`（textarea，可选）、提交按钮。`handleCreate` 用 `FormEvent` 阻止默认提交，`name.trim()` 为空时前端阻止并显示「name 不能为空」；调 `createCharacter({ name: name.trim(), description: description.trim() || undefined })`，成功后 `setCharacters((prev) => [created, ...prev])`（prepend，匹配后端 createdAt desc 顺序）、清空表单；失败显示错误信息。
+  - 列表区：loading 显示「加载中…」、空数组显示「暂无角色」、有数据用 `<ul>` 渲染 `name` / `description ?? '无描述'` / `createdAt`（原始 ISO 字符串直接显示，不做格式化）。
+  - 类型 import：`import { useEffect, useState, type FormEvent } from 'react'`（inline type import，匹配 `jsx: react-jsx` 下不默认导入 React 的配置）。
+- 验证：`pnpm typecheck` 通过；`pnpm build` 通过（web 32 modules transformed，含新增 api.ts）。
+- `pnpm dev` 后通过 Vite proxy（5173）实测：页面 HTML 200 且含 `<div id="root">`；`GET /api/health` → `{"status":"ok",...}`（health 显示 connected）；`GET /api/characters` 返回已有角色；`POST /api/characters`（Luna）→ 201 创建成功；再次 GET 列表含新角色且位于顶部；`POST` 空 name → 400。
+- 未改动：apps/server、apps/server/prisma、packages/shared、AGENTS.md、根 package.json、tsconfig.base.json、pnpm-workspace.yaml、pnpm-lock.yaml；未安装新依赖；未提交 Git；未做路由/编辑器/聊天/世界书/模型配置。
