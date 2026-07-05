@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
 import type { CharacterDto, ChatHistoryMessage } from '@roleagent/shared';
 import { sendChat } from '../api';
 
@@ -10,9 +10,17 @@ interface ChatMessage {
 
 interface ChatPanelProps {
   character: CharacterDto;
+  detailOpen: boolean;
+  onToggleDetail: () => void;
+  detailSlot: ReactNode;
 }
 
-export function ChatPanel({ character }: ChatPanelProps) {
+export function ChatPanel({
+  character,
+  detailOpen,
+  onToggleDetail,
+  detailSlot,
+}: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     if (character.firstMessage) {
       return [
@@ -69,14 +77,29 @@ export function ChatPanel({ character }: ChatPanelProps) {
   };
 
   return (
-    <section className="workspace-panel chat-panel">
-      <header className="panel-header">
-        <div>
+    <section className="workspace-panel chat-panel chat-main">
+      <header className="chat-header">
+        <div className="chat-title-block">
           <p className="eyebrow">Conversation</p>
-          <h2>Chat with {character.name}</h2>
+          <h2>{character.name}</h2>
+          <p className="chat-description">
+            {character.description ?? 'No description yet. Open details to manage this character.'}
+          </p>
         </div>
-        <span className="count-pill">{messages.length}</span>
+        <div className="chat-header-actions">
+          <span className="count-pill">{messages.length}</span>
+          <button
+            className="button button--secondary"
+            type="button"
+            onClick={onToggleDetail}
+            aria-expanded={detailOpen}
+          >
+            {detailOpen ? 'Hide detail' : 'Detail'}
+          </button>
+        </div>
       </header>
+
+      {detailOpen && <div className="chat-detail-drawer">{detailSlot}</div>}
 
       <div className="chat-history" aria-live="polite">
         {messages.length === 0 && (

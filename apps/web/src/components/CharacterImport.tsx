@@ -118,7 +118,7 @@ export function CharacterImport({ onImported }: CharacterImportProps) {
   };
 
   return (
-    <section className="sidebar-panel import-panel">
+    <section className="import-panel">
       <div className="section-heading">
         <p className="eyebrow">Card import</p>
         <h2>Import Character</h2>
