@@ -8,6 +8,14 @@ interface CharacterDetailProps {
   onDeleted: (id: string) => void;
 }
 
+function formatDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString();
+}
+
 export function CharacterDetail({
   character,
   onUpdated,
@@ -59,26 +67,48 @@ export function CharacterDetail({
   };
 
   return (
-    <section>
-      <h2>Character Detail</h2>
-      <dl>
-        <dt>id</dt>
-        <dd>{character.id}</dd>
-        <dt>name</dt>
-        <dd>{character.name}</dd>
-        <dt>description</dt>
-        <dd>{character.description ?? 'no description'}</dd>
-        <dt>createdAt</dt>
-        <dd>{character.createdAt}</dd>
-        <dt>updatedAt</dt>
-        <dd>{character.updatedAt}</dd>
-      </dl>
-
-      <h3>Edit</h3>
-      <form onSubmit={handleSave}>
+    <section className="workspace-panel character-detail-panel">
+      <header className="panel-header">
         <div>
-          <label>
-            name:
+          <p className="eyebrow">Character detail</p>
+          <h2>{character.name}</h2>
+          <p className="panel-subtitle">
+            {character.description ?? 'No description has been written yet.'}
+          </p>
+        </div>
+        <div className="meta-stack">
+          <span>Created {formatDate(character.createdAt)}</span>
+          <span>Updated {formatDate(character.updatedAt)}</span>
+        </div>
+      </header>
+
+      <div className="detail-grid">
+        <section className="detail-card">
+          <h3>Persona</h3>
+          <p>{character.persona ?? 'No persona notes yet.'}</p>
+        </section>
+        <section className="detail-card">
+          <h3>Scenario</h3>
+          <p>{character.scenario ?? 'No scenario has been set.'}</p>
+        </section>
+        <section className="detail-card">
+          <h3>First message</h3>
+          <p>{character.firstMessage ?? 'No opening message configured.'}</p>
+        </section>
+        <section className="detail-card">
+          <h3>System prompt</h3>
+          <p>{character.systemPrompt ?? 'No system prompt configured.'}</p>
+        </section>
+      </div>
+
+      <form className="edit-panel" onSubmit={handleSave}>
+        <div className="section-heading">
+          <p className="eyebrow">Manage</p>
+          <h3>Edit character</h3>
+        </div>
+        <div className="edit-grid">
+          <label className="field">
+            <span>Name</span>
             <input
               type="text"
               value={editName}
@@ -86,28 +116,30 @@ export function CharacterDetail({
               disabled={editing || deleting}
             />
           </label>
-        </div>
-        <div>
-          <label>
-            description:
+          <label className="field">
+            <span>Description</span>
             <textarea
               value={editDescription}
               onChange={(e) => setEditDescription(e.target.value)}
               disabled={editing || deleting}
+              rows={3}
             />
           </label>
         </div>
-        <button type="submit" disabled={editing || deleting}>
-          {editing ? 'Saving...' : 'Save'}
-        </button>
-        <button
-          type="button"
-          onClick={handleDelete}
-          disabled={editing || deleting}
-        >
-          {deleting ? 'Deleting...' : 'Delete'}
-        </button>
-        {error !== null && <p style={{ color: 'red' }}>{error}</p>}
+        <div className="action-row">
+          <button className="button button--primary" type="submit" disabled={editing || deleting}>
+            {editing ? 'Saving...' : 'Save changes'}
+          </button>
+          <button
+            className="button button--danger"
+            type="button"
+            onClick={handleDelete}
+            disabled={editing || deleting}
+          >
+            {deleting ? 'Deleting...' : 'Delete'}
+          </button>
+        </div>
+        {error !== null && <p className="notice notice--error">{error}</p>}
       </form>
     </section>
   );

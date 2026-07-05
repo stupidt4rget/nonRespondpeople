@@ -69,21 +69,39 @@ export function ChatPanel({ character }: ChatPanelProps) {
   };
 
   return (
-    <section>
-      <h2>Chat with {character.name}</h2>
-      <div>
-        {messages.length === 0 && <p>No messages yet</p>}
+    <section className="workspace-panel chat-panel">
+      <header className="panel-header">
+        <div>
+          <p className="eyebrow">Conversation</p>
+          <h2>Chat with {character.name}</h2>
+        </div>
+        <span className="count-pill">{messages.length}</span>
+      </header>
+
+      <div className="chat-history" aria-live="polite">
+        {messages.length === 0 && (
+          <div className="chat-empty">
+            <strong>No messages yet</strong>
+            <p>Send the first message to begin the scene.</p>
+          </div>
+        )}
         {messages.length > 0 && (
-          <ul>
+          <ol className="message-list">
             {messages.map((m, i) => (
-              <li key={i}>
-                <strong>{m.role}:</strong> {m.content}
+              <li className={`message-row message-row--${m.role}`} key={i}>
+                <article className="message-bubble">
+                  <span className="message-role">
+                    {m.role === 'user' ? 'You' : character.name}
+                  </span>
+                  <p>{m.content}</p>
+                </article>
               </li>
             ))}
-          </ul>
+          </ol>
         )}
       </div>
-      <form onSubmit={handleSend}>
+
+      <form className="chat-composer" onSubmit={handleSend}>
         <input
           type="text"
           value={input}
@@ -91,10 +109,10 @@ export function ChatPanel({ character }: ChatPanelProps) {
           disabled={sending}
           placeholder="Type a message..."
         />
-        <button type="submit" disabled={sending}>
+        <button className="button button--primary" type="submit" disabled={sending}>
           {sending ? 'Sending...' : 'Send'}
         </button>
-        {error !== null && <p style={{ color: 'red' }}>{error}</p>}
+        {error !== null && <p className="notice notice--error">{error}</p>}
       </form>
     </section>
   );
