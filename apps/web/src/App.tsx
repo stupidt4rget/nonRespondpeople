@@ -4,6 +4,7 @@ import type { HealthResponse, CharacterDto } from '@roleagent/shared';
 import { fetchCharacters, createCharacter } from './api';
 import { CharacterDetail } from './components/CharacterDetail';
 import { ChatPanel } from './components/ChatPanel';
+import { CharacterImport } from './components/CharacterImport';
 
 type ConnectionState = 'checking' | 'connected' | 'error';
 
@@ -94,6 +95,11 @@ export function App() {
     );
   };
 
+  const handleImported = (created: CharacterDto) => {
+    setCharacters((prev) => [created, ...prev]);
+    setSelectedId(created.id);
+  };
+
   const handleDeleted = (id: string) => {
     setCharacters((prev) => prev.filter((c) => c.id !== id));
     setSelectedId(null);
@@ -169,6 +175,10 @@ export function App() {
           {formError !== null && <p style={{ color: 'red' }}>{formError}</p>}
         </form>
       </section>
+
+      <hr />
+
+      <CharacterImport onImported={handleImported} />
 
       <hr />
 

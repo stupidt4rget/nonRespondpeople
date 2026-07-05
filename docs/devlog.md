@@ -93,3 +93,16 @@
 - No schema change, no migration, no new deps, no real LLM.
 - Verified: pnpm typecheck pass; pnpm build pass (34 modules). pnpm dev API tests: POST /chat valid 200 with mock reply; empty message 400; nonexistent characterId 404; non-object body 400; missing characterId 400.
 - Untouched: apps/server/prisma, package.json, pnpm-lock.yaml, AGENTS.md, tsconfig.base.json, pnpm-workspace.yaml; no Git commit.
+
+## 2026-07-05 - API chat + character card import V0.4
+- Prisma: added 6 optional fields to Character model (persona, scenario, firstMessage, messageExample, systemPrompt, rawCardJson). Migration `20260705091654_add_character_card_fields`.
+- shared: CharacterDto extended with 6 new fields (all string|null). CreateCharacterRequest/UpdateCharacterRequest extended. ChatRequest added optional history (ChatHistoryMessage[]). New types: ChatHistoryMessage, ImportCharacterCardRequest, ImportCharacterCardResponse (= CharacterDto).
+- server/routes/characters.ts: toCharacterDto includes new fields. POST and PATCH accept new fields. New POST /api/characters/import (placed before /:id) creates Character from imported card data including rawCardJson. strOrNull helper for create; OPTIONAL_CARD_FIELDS loop for PATCH validation.
+- server/routes/chat.ts: replaced mock with real OpenAI-compatible call. Reads LLM_API_BASE_URL/LLM_API_KEY/LLM_MODEL from env; 500 if any missing (key not leaked). Builds system message from character persona/description/scenario/systemPrompt. Includes history from request (validated). Calls {baseUrl}/chat/completions with Bearer auth, stream:false. Parses choices[0].message.content with unknown narrowing. Network error -> 502, non-2xx -> 502. Trailing slash on baseUrl stripped.
+- web/api.ts: sendChat accepts ChatRequest (with history). New importCharacterCard function.
+- web/components/ChatPanel.tsx: initializes messages with character.firstMessage as first assistant message if present. Sends history (all prior messages) with each chat request.
+- web/components/CharacterImport.tsx (new): file input accepting .json and .png. JSON: parse text. PNG: manual chunk parsing with DataView/Uint8Array/TextDecoder, finds tEXt chunk keyword "chara", atob base64 decode, JSON.parse. mapCardToImport supports v1 (flat) and v2 (data nested), snake_case and camelCase field names. No new deps. Calls importCharacterCard, onImported callback.
+- web/App.tsx: added CharacterImport section + handleImported (prepend to list + select new character).
+- README: added LLM Configuration section + import/chat endpoints in API table.
+- Verified: pnpm typecheck pass; pnpm build pass (35 modules). API tests: POST /import 201 with new fields; GET /:id returns new fields; PATCH persona 200; POST /chat no config 500; POST /chat nonexistent 404.
+- Untouched: apps/server/src/index.ts, apps/server/src/db/prisma.ts, package.json, pnpm-lock.yaml, AGENTS.md, tsconfig.base.json, pnpm-workspace.yaml; no Git commit.
