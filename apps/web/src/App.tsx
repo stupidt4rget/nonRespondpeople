@@ -5,6 +5,7 @@ import { fetchCharacters, createCharacter } from './api';
 import { CharacterDetail } from './components/CharacterDetail';
 import { ChatPanel } from './components/ChatPanel';
 import { CharacterImport } from './components/CharacterImport';
+import { LlmSettings } from './components/LlmSettings';
 import './App.css';
 
 type ConnectionState = 'checking' | 'connected' | 'error';
@@ -135,6 +136,8 @@ export function App() {
             </div>
           </div>
         </header>
+
+        <LlmSettings />
 
         <section className="sidebar-panel">
           <div className="section-heading">

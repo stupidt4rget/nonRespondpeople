@@ -7,6 +7,8 @@
   ChatRequest,
   ChatResponse,
   ImportCharacterCardRequest,
+  LlmSettingsRequest,
+  LlmSettingsStatusResponse,
 } from '@roleagent/shared';
 
 async function throwApiError(res: Response): Promise<never> {
@@ -104,4 +106,26 @@ export async function sendChat(body: ChatRequest): Promise<ChatResponse> {
     return throwApiError(res);
   }
   return (await res.json()) as ChatResponse;
+}
+
+export async function getLlmSettings(): Promise<LlmSettingsStatusResponse> {
+  const res = await fetch('/api/settings/llm');
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as LlmSettingsStatusResponse;
+}
+
+export async function saveLlmSettings(
+  body: LlmSettingsRequest,
+): Promise<LlmSettingsStatusResponse> {
+  const res = await fetch('/api/settings/llm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as LlmSettingsStatusResponse;
 }

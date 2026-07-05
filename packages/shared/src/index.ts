@@ -68,6 +68,20 @@ export interface ChatResponse {
   reply: string;
 }
 
+export interface LlmSettingsRequest {
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+}
+
+export interface LlmSettingsStatusResponse {
+  configured: boolean;
+  source: 'memory' | 'env' | 'none';
+  baseUrl: string | null;
+  model: string | null;
+  hasApiKey: boolean;
+}
+
 export interface ImportCharacterCardRequest {
   name: string;
   description?: string;
