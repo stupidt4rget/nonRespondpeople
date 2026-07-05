@@ -4,6 +4,8 @@
   CreateCharacterRequest,
   UpdateCharacterRequest,
   DeleteCharacterResponse,
+  ChatRequest,
+  ChatResponse,
 } from '@roleagent/shared';
 
 async function throwApiError(res: Response): Promise<never> {
@@ -75,4 +77,16 @@ export async function deleteCharacter(
     return throwApiError(res);
   }
   return (await res.json()) as DeleteCharacterResponse;
+}
+
+export async function sendChat(body: ChatRequest): Promise<ChatResponse> {
+  const res = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as ChatResponse;
 }

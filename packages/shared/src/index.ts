@@ -36,3 +36,12 @@ export interface DeleteCharacterResponse {
   ok: true;
   id: string;
 }
+
+export interface ChatRequest {
+  characterId: string;
+  message: string;
+}
+
+export interface ChatResponse {
+  reply: string;
+}

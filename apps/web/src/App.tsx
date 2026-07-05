@@ -3,6 +3,7 @@ import { appName } from '@roleagent/shared';
 import type { HealthResponse, CharacterDto } from '@roleagent/shared';
 import { fetchCharacters, createCharacter } from './api';
 import { CharacterDetail } from './components/CharacterDetail';
+import { ChatPanel } from './components/ChatPanel';
 
 type ConnectionState = 'checking' | 'connected' | 'error';
 
@@ -172,12 +173,16 @@ export function App() {
       <hr />
 
       {selected !== null ? (
-        <CharacterDetail
-          key={selected.id}
-          character={selected}
-          onUpdated={handleUpdated}
-          onDeleted={handleDeleted}
-        />
+        <>
+          <CharacterDetail
+            key={selected.id}
+            character={selected}
+            onUpdated={handleUpdated}
+            onDeleted={handleDeleted}
+          />
+          <hr />
+          <ChatPanel key={`chat-${selected.id}`} character={selected} />
+        </>
       ) : (
         <section>
           <h2>Character Detail</h2>
