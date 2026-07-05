@@ -1170,3 +1170,72 @@ body {
 .chat-composer {
   box-shadow: 0 -12px 34px rgba(0, 0, 0, 0.04);
 }
+
+.worldbook-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.worldbook-list {
+  display: grid;
+  gap: 10px;
+  max-height: 300px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.worldbook-item {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #e3e3e7;
+  border-radius: 8px;
+  padding: 10px;
+  background: #ffffff;
+}
+
+.worldbook-check {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  color: #202123;
+}
+
+.worldbook-check input {
+  width: auto;
+  margin-top: 3px;
+}
+
+.worldbook-check strong,
+.worldbook-check small {
+  display: block;
+}
+
+.worldbook-check strong {
+  overflow: hidden;
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worldbook-check small {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #6e6e73;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.worldbook-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.worldbook-actions .button {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 0.82rem;
+}

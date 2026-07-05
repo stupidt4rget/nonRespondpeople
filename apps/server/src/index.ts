@@ -5,6 +5,8 @@ import { prisma } from './db/prisma.js';
 import { characterRoutes } from './routes/characters.js';
 import { chatRoutes } from './routes/chat.js';
 import { settingsRoutes } from './routes/settings.js';
+import { worldBookRoutes } from './routes/worldbooks.js';
+import { conversationRoutes } from './routes/conversations.js';
 
 const app = Fastify({ logger: true });
 
@@ -31,6 +33,8 @@ const start = async () => {
   try {
     await app.register(characterRoutes);
     await app.register(settingsRoutes);
+    await app.register(worldBookRoutes);
+    await app.register(conversationRoutes);
     await app.register(chatRoutes);
     await app.listen({ port, host });
   } catch (err) {

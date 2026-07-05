@@ -2,6 +2,12 @@ import type { FastifyInstance } from 'fastify';
 import type { ChatRequest, ChatResponse } from '@roleagent/shared';
 import { prisma } from '../db/prisma.js';
 import { getActiveLlmSettings } from './settings.js';
+import {
+  getConversationMessages,
+  getOrCreateCharacterConversation,
+  toChatMessageDto,
+  toConversationDto,
+} from './conversations.js';
 
 function isPlainObject(value: unknown): value is object {
   return (
@@ -17,7 +23,7 @@ function buildSystemMessage(character: {
   description: string | null;
   scenario: string | null;
   systemPrompt: string | null;
-}): string {
+}, worldBooks: { name: string; description: string | null; entriesJson: string }[]): string {
   const parts: string[] = [`You are roleplaying as ${character.name}.`];
   if (character.persona) {
     parts.push(character.persona);
@@ -30,30 +36,87 @@ function buildSystemMessage(character: {
   if (character.systemPrompt) {
     parts.push(character.systemPrompt);
   }
+  const worldBookText = buildWorldBookPrompt(worldBooks);
+  if (worldBookText) {
+    parts.push(worldBookText);
+  }
   return parts.join('\n\n');
 }
 
-function extractHistory(history: unknown): { role: string; content: string }[] {
-  if (!Array.isArray(history)) return [];
-  const result: { role: string; content: string }[] = [];
-  for (const item of history) {
-    if (
-      item !== null &&
-      typeof item === 'object' &&
-      'role' in item &&
-      'content' in item
-    ) {
-      const role = (item as { role: unknown }).role;
-      const content = (item as { content: unknown }).content;
-      if (
-        (role === 'user' || role === 'assistant') &&
-        typeof content === 'string'
-      ) {
-        result.push({ role, content });
-      }
-    }
+function parseWorldBookIds(value: string | null): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === 'string');
+  } catch {
+    return [];
   }
-  return result;
+}
+
+function parseJson(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
+
+function clipText(value: string, maxLength: number): string {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+}
+
+function entryToText(entry: unknown): string {
+  if (entry !== null && typeof entry === 'object' && !Array.isArray(entry)) {
+    const record = entry as Record<string, unknown>;
+    const keys = Array.isArray(record.keys)
+      ? record.keys.filter((key): key is string => typeof key === 'string').join(', ')
+      : '';
+    const secondary = Array.isArray(record.secondary_keys)
+      ? record.secondary_keys.filter((key): key is string => typeof key === 'string').join(', ')
+      : '';
+    const content = typeof record.content === 'string' ? record.content : '';
+    const comment = typeof record.comment === 'string' ? record.comment : '';
+    return [
+      keys ? `Keys: ${keys}` : '',
+      secondary ? `Secondary keys: ${secondary}` : '',
+      comment ? `Comment: ${comment}` : '',
+      content,
+    ].filter(Boolean).join('\n');
+  }
+  return typeof entry === 'string' ? entry : JSON.stringify(entry);
+}
+
+function buildWorldBookPrompt(
+  worldBooks: { name: string; description: string | null; entriesJson: string }[],
+): string {
+  const maxPerBook = 4000;
+  const maxTotal = 12000;
+  const chunks: string[] = [];
+  let total = 0;
+
+  for (const worldBook of worldBooks) {
+    const parsed = parseJson(worldBook.entriesJson);
+    const entries = Array.isArray(parsed) ? parsed : [parsed];
+    const entriesText = entries.map(entryToText).filter(Boolean).join('\n\n');
+    const text = [
+      `Worldbook: ${worldBook.name}`,
+      worldBook.description ? `Description: ${worldBook.description}` : '',
+      entriesText,
+    ].filter(Boolean).join('\n');
+    const clipped = clipText(text, maxPerBook);
+    if (total + clipped.length > maxTotal) {
+      const remaining = maxTotal - total;
+      if (remaining > 0) chunks.push(clipText(clipped, remaining));
+      break;
+    }
+    chunks.push(clipped);
+    total += clipped.length;
+  }
+
+  return chunks.length > 0
+    ? `当前启用世界书内容如下，作为角色扮演背景参考：\n\n${chunks.join('\n\n---\n\n')}`
+    : '';
 }
 
 export async function chatRoutes(app: FastifyInstance) {
@@ -61,7 +124,7 @@ export async function chatRoutes(app: FastifyInstance) {
     if (!isPlainObject(req.body)) {
       return reply.code(400).send({ error: 'request body must be an object' });
     }
-    const { characterId, message, history } = req.body as ChatRequest;
+    const { characterId, message } = req.body as ChatRequest;
 
     if (
       typeof characterId !== 'string' ||
@@ -91,10 +154,18 @@ export async function chatRoutes(app: FastifyInstance) {
         .send({ error: 'LLM is not configured on the server' });
     }
 
-    const systemContent = buildSystemMessage(found);
+    const conversation = await getOrCreateCharacterConversation(found.id);
+    const savedMessages = await getConversationMessages(conversation.id);
+    const activeWorldBookIds = parseWorldBookIds(conversation.activeWorldBookIdsJson);
+    const worldBooks = await prisma.worldBook.findMany({
+      where: { id: { in: activeWorldBookIds } },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    const systemContent = buildSystemMessage(found, worldBooks);
     const messages: { role: string; content: string }[] = [
       { role: 'system', content: systemContent },
-      ...extractHistory(history),
+      ...savedMessages.map((m) => ({ role: m.role, content: m.content })),
       { role: 'user', content: message },
     ];
 
@@ -139,7 +210,32 @@ export async function chatRoutes(app: FastifyInstance) {
         .send({ error: 'LLM API returned invalid content' });
     }
 
-    const body: ChatResponse = { reply: content };
+    const [userMessage, assistantMessage] = await prisma.$transaction([
+      prisma.chatMessage.create({
+        data: {
+          conversationId: conversation.id,
+          role: 'user',
+          content: message.trim(),
+        },
+      }),
+      prisma.chatMessage.create({
+        data: {
+          conversationId: conversation.id,
+          role: 'assistant',
+          content,
+        },
+      }),
+    ]);
+    const latestMessages = await getConversationMessages(conversation.id);
+
+    const body: ChatResponse = {
+      reply: content,
+      conversation: toConversationDto(conversation),
+      userMessage: toChatMessageDto(userMessage),
+      assistantMessage: toChatMessageDto(assistantMessage),
+      messages: latestMessages.map(toChatMessageDto),
+      activeWorldBookIds,
+    };
     return reply.send(body);
   });
 }
