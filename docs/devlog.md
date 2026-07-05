@@ -82,3 +82,14 @@
 - No schema change, no migration, no new deps.
 - Verified: pnpm typecheck pass; pnpm build pass (33 modules). pnpm dev API tests: GET /:id 200/404, PATCH name/description/null 200, PATCH empty name/no fields/nonexistent 400/400/404, DELETE 200/404, POST non-object body 400. All passed.
 - Untouched: apps/server/prisma, apps/server/src/index.ts, package.json, pnpm-lock.yaml, AGENTS.md, tsconfig.base.json, pnpm-workspace.yaml; no Git commit.
+
+## 2026-07-05 - Minimal chat V0.3
+- New apps/server/src/routes/chat.ts: POST /api/chat. Validates body is object, characterId + message non-empty strings, looks up character (404 if not found), returns ChatResponse { reply: "Mock reply from {name}: I received your message." }. No real LLM. Reuses prisma singleton; isPlainObject guard duplicated locally (same pattern as characters.ts).
+- Modified apps/server/src/index.ts: import + register chatRoutes alongside characterRoutes.
+- packages/shared/src/index.ts: added ChatRequest { characterId; message } and ChatResponse { reply }.
+- apps/web/src/api.ts: added sendChat(body) using existing throwApiError helper.
+- New apps/web/src/components/ChatPanel.tsx: local ChatMessage type (role/content/createdAt); messages state (not persisted); input + Send button; on send appends user msg, calls sendChat, appends assistant reply; empty input blocked; error display. key reset via parent.
+- apps/web/src/App.tsx: when a character is selected, renders ChatPanel below CharacterDetail (with key=`chat-{id}` to reset on switch). No layout refactor.
+- No schema change, no migration, no new deps, no real LLM.
+- Verified: pnpm typecheck pass; pnpm build pass (34 modules). pnpm dev API tests: POST /chat valid 200 with mock reply; empty message 400; nonexistent characterId 404; non-object body 400; missing characterId 400.
+- Untouched: apps/server/prisma, package.json, pnpm-lock.yaml, AGENTS.md, tsconfig.base.json, pnpm-workspace.yaml; no Git commit.

@@ -3,6 +3,7 @@ import { appName } from '@roleagent/shared';
 import type { HealthResponse, DbHealthResponse } from '@roleagent/shared';
 import { prisma } from './db/prisma.js';
 import { characterRoutes } from './routes/characters.js';
+import { chatRoutes } from './routes/chat.js';
 
 const app = Fastify({ logger: true });
 
@@ -28,6 +29,7 @@ const start = async () => {
   const host = process.env.HOST ?? '0.0.0.0';
   try {
     await app.register(characterRoutes);
+    await app.register(chatRoutes);
     await app.listen({ port, host });
   } catch (err) {
     app.log.error(err);
