@@ -65,3 +65,17 @@
 - 验证：`pnpm typecheck` 通过；`pnpm build` 通过（web 32 modules transformed，含新增 api.ts）。
 - `pnpm dev` 后通过 Vite proxy（5173）实测：页面 HTML 200 且含 `<div id="root">`；`GET /api/health` → `{"status":"ok",...}`（health 显示 connected）；`GET /api/characters` 返回已有角色；`POST /api/characters`（Luna）→ 201 创建成功；再次 GET 列表含新角色且位于顶部；`POST` 空 name → 400。
 - 未改动：apps/server、apps/server/prisma、packages/shared、AGENTS.md、根 package.json、tsconfig.base.json、pnpm-workspace.yaml、pnpm-lock.yaml；未安装新依赖；未提交 Git；未做路由/编辑器/聊天/世界书/模型配置。
+
+## 2026-07-05 - V0.1 run and validation docs
+- Updated `README.md` to reflect V0.1 status (previous description was outdated, still saying "skeleton stage, roles not implemented"):
+  - Top intro changed to: V0.1 stage, Prisma + SQLite wired up, Character model + minimal backend API + minimal frontend page implemented; chat/worldbook/model config are later phases.
+  - Added "Current Features (V0.1)" section: health, Character list, Character create form, Prisma + SQLite.
+  - Tech stack added "Database: Prisma 6 + SQLite".
+  - Directory structure updated with `apps/server/prisma/` (schema.prisma, migrations/) and `apps/web/src/api.ts`.
+  - Added "Fresh Clone Setup (Windows PowerShell)" section with command sequence: `pnpm install` -> `db:generate` -> `prisma migrate dev` -> `pnpm dev`, explaining that `db:generate` produces the Prisma Client, `migrate dev` applies `add_character_model` to create tables, both need `DATABASE_URL` (injected via PowerShell temp env var, no `.env` written). Added one-line bash equivalent note.
+  - Prerequisites added `DATABASE_URL` fallback note: runtime works without `.env`, but generate/migrate need it injected.
+  - "Health check endpoint" expanded to "API Endpoints" table: 4 endpoints (health / db-health / characters GET / characters POST) + examples.
+  - Added "Notes" section: do not commit dev.db/.env/dist, dev.db location `apps/server/prisma/dev.db`, branch note (`main` is not latest, `dev` is current dev branch, features on `feature/*` merged into `dev`).
+- Updated `docs/todo.md`: checked off `Prisma: document pnpm install + db:generate fresh-clone step in README / CI.` Other routing/app shell/API client todos remain unchecked.
+- Untouched: apps/, packages/, package.json, pnpm-lock.yaml, AGENTS.md, tsconfig.base.json, pnpm-workspace.yaml; no new files; no deps installed; no commands run; no Git commit. Doc-only changes, no typecheck/build needed.
+- Encoding fix: rewrote README.md entirely in ASCII English and this devlog entry in English to avoid mojibake (the previous Chinese text plus the middle-dot "·" and em-dash "—" caused "鈥?" garbling under GBK viewers). Replaced the non-ASCII em dash in todo.md with a plain ASCII "-".
