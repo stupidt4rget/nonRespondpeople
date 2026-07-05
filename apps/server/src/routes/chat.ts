@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { ChatRequest, ChatResponse } from '@roleagent/shared';
 import { prisma } from '../db/prisma.js';
+import { getActiveLlmSettings } from './settings.js';
 
 function isPlainObject(value: unknown): value is object {
   return (
@@ -83,11 +84,8 @@ export async function chatRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: 'character not found' });
     }
 
-    const baseUrl = process.env.LLM_API_BASE_URL;
-    const apiKey = process.env.LLM_API_KEY;
-    const model = process.env.LLM_MODEL;
-
-    if (!baseUrl || !apiKey || !model) {
+    const llmSettings = getActiveLlmSettings();
+    if (!llmSettings) {
       return reply
         .code(500)
         .send({ error: 'LLM is not configured on the server' });
@@ -100,7 +98,7 @@ export async function chatRoutes(app: FastifyInstance) {
       { role: 'user', content: message },
     ];
 
-    const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+    const url = `${llmSettings.baseUrl.replace(/\/+$/, '')}/chat/completions`;
 
     let llmRes: Response;
     try {
@@ -108,9 +106,9 @@ export async function chatRoutes(app: FastifyInstance) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${llmSettings.apiKey}`,
         },
-        body: JSON.stringify({ model, messages, stream: false }),
+        body: JSON.stringify({ model: llmSettings.model, messages, stream: false }),
       });
     } catch (err) {
       app.log.error(err);
