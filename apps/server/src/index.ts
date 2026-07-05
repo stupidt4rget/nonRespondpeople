@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import { appName } from '@roleagent/shared';
 import type { HealthResponse, DbHealthResponse } from '@roleagent/shared';
 import { prisma } from './db/prisma.js';
+import { characterRoutes } from './routes/characters.js';
 
 const app = Fastify({ logger: true });
 
@@ -26,6 +27,7 @@ const start = async () => {
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? '0.0.0.0';
   try {
+    await app.register(characterRoutes);
     await app.listen({ port, host });
   } catch (err) {
     app.log.error(err);
