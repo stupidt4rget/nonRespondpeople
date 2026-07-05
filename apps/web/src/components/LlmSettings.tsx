@@ -85,7 +85,7 @@ export function LlmSettings() {
   };
 
   return (
-    <section className="sidebar-panel llm-settings-panel">
+    <section className="llm-settings-panel">
       <div className="section-heading section-heading--row">
         <div>
           <p className="eyebrow">LLM API</p>

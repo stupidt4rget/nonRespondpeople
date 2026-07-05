@@ -27,6 +27,7 @@ export function CharacterDetail({
   );
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [textExpanded, setTextExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleSave = async (e: FormEvent) => {
@@ -67,8 +68,8 @@ export function CharacterDetail({
   };
 
   return (
-    <section className="workspace-panel character-detail-panel">
-      <header className="panel-header">
+    <section className="character-detail-panel">
+      <header className="detail-drawer-header">
         <div>
           <p className="eyebrow">Character detail</p>
           <h2>{character.name}</h2>
@@ -82,29 +83,20 @@ export function CharacterDetail({
         </div>
       </header>
 
-      <div className="detail-grid">
-        <section className="detail-card">
-          <h3>Persona</h3>
-          <p>{character.persona ?? 'No persona notes yet.'}</p>
-        </section>
-        <section className="detail-card">
-          <h3>Scenario</h3>
-          <p>{character.scenario ?? 'No scenario has been set.'}</p>
-        </section>
-        <section className="detail-card">
-          <h3>First message</h3>
-          <p>{character.firstMessage ?? 'No opening message configured.'}</p>
-        </section>
-        <section className="detail-card">
-          <h3>System prompt</h3>
-          <p>{character.systemPrompt ?? 'No system prompt configured.'}</p>
-        </section>
-      </div>
-
       <form className="edit-panel" onSubmit={handleSave}>
-        <div className="section-heading">
-          <p className="eyebrow">Manage</p>
-          <h3>Edit character</h3>
+        <div className="section-heading section-heading--row">
+          <div>
+            <p className="eyebrow">Manage</p>
+            <h3>Edit character</h3>
+          </div>
+          <button
+            className="button button--danger"
+            type="button"
+            onClick={handleDelete}
+            disabled={editing || deleting}
+          >
+            {deleting ? 'Deleting...' : 'Delete character'}
+          </button>
         </div>
         <div className="edit-grid">
           <label className="field">
@@ -130,17 +122,42 @@ export function CharacterDetail({
           <button className="button button--primary" type="submit" disabled={editing || deleting}>
             {editing ? 'Saving...' : 'Save changes'}
           </button>
-          <button
-            className="button button--danger"
-            type="button"
-            onClick={handleDelete}
-            disabled={editing || deleting}
-          >
-            {deleting ? 'Deleting...' : 'Delete'}
-          </button>
         </div>
         {error !== null && <p className="notice notice--error">{error}</p>}
       </form>
+
+      <div className={`detail-grid${textExpanded ? ' detail-grid--expanded' : ''}`}>
+        <section className="detail-card">
+          <h3>Persona</h3>
+          <p className="detail-text">{character.persona ?? 'No persona notes yet.'}</p>
+        </section>
+        <section className="detail-card">
+          <h3>Scenario</h3>
+          <p className="detail-text">{character.scenario ?? 'No scenario has been set.'}</p>
+        </section>
+        <section className="detail-card">
+          <h3>First message</h3>
+          <p className="detail-text">
+            {character.firstMessage ?? 'No opening message configured.'}
+          </p>
+        </section>
+        <section className="detail-card">
+          <h3>System prompt</h3>
+          <p className="detail-text">
+            {character.systemPrompt ?? 'No system prompt configured.'}
+          </p>
+        </section>
+      </div>
+
+      <div className="detail-actions">
+        <button
+          className="button button--secondary"
+          type="button"
+          onClick={() => setTextExpanded((prev) => !prev)}
+        >
+          {textExpanded ? 'Show less' : 'Show more'}
+        </button>
+      </div>
     </section>
   );
 }
