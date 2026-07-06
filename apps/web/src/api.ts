@@ -6,6 +6,7 @@
   DeleteCharacterResponse,
   ChatRequest,
   ChatResponse,
+  RegenerateChatResponse,
   ImportCharacterCardRequest,
   LlmSettingsRequest,
   LlmSettingsStatusResponse,
@@ -17,6 +18,7 @@
   CharacterWorldBooksResponse,
   UpdateCharacterWorldBooksRequest,
   CharacterConversationResponse,
+  UpdateChatMessageRequest,
   UpdateConversationWorldBooksRequest,
 } from '@roleagent/shared';
 
@@ -240,4 +242,63 @@ export async function updateConversationWorldBooks(
     return throwApiError(res);
   }
   return (await res.json()) as CharacterConversationResponse;
+}
+
+export async function updateChatMessage(
+  conversationId: string,
+  messageId: string,
+  body: UpdateChatMessageRequest,
+): Promise<CharacterConversationResponse> {
+  const res = await fetch(
+    `/api/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as CharacterConversationResponse;
+}
+
+export async function deleteChatMessage(
+  conversationId: string,
+  messageId: string,
+): Promise<CharacterConversationResponse> {
+  const res = await fetch(
+    `/api/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}`,
+    { method: 'DELETE' },
+  );
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as CharacterConversationResponse;
+}
+
+export async function clearConversationMessages(
+  conversationId: string,
+): Promise<CharacterConversationResponse> {
+  const res = await fetch(
+    `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+    { method: 'DELETE' },
+  );
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as CharacterConversationResponse;
+}
+
+export async function regenerateLastAssistant(
+  conversationId: string,
+): Promise<RegenerateChatResponse> {
+  const res = await fetch(
+    `/api/conversations/${encodeURIComponent(conversationId)}/regenerate`,
+    { method: 'POST' },
+  );
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as RegenerateChatResponse;
 }

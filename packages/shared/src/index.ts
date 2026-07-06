@@ -79,6 +79,14 @@ export interface ChatResponse {
   activeWorldBookIds?: string[];
 }
 
+export interface RegenerateChatResponse {
+  reply: string;
+  conversation: ConversationDto;
+  assistantMessage: ChatMessageDto;
+  messages: ChatMessageDto[];
+  activeWorldBookIds: string[];
+}
+
 export interface LlmSettingsRequest {
   baseUrl: string;
   model: string;
@@ -183,4 +191,8 @@ export interface CharacterConversationResponse {
 
 export interface UpdateConversationWorldBooksRequest {
   worldBookIds: string[];
+}
+
+export interface UpdateChatMessageRequest {
+  content: string;
 }
