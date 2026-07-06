@@ -544,6 +544,75 @@
   white-space: pre-wrap;
 }
 
+.message-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.message-action-button {
+  min-height: 28px;
+  border: 1px solid #d9d9de;
+  border-radius: 8px;
+  padding: 0 9px;
+  background: #ffffff;
+  color: #343541;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.message-action-button:hover:not(:disabled) {
+  border-color: #b7b7bd;
+  background: #f4f4f5;
+}
+
+.message-action-button--danger {
+  border-color: #f0b8c0;
+  color: #b4233a;
+}
+
+.message-action-button--danger:hover:not(:disabled) {
+  border-color: #df7c89;
+  background: #fff0f2;
+}
+
+.message-edit-form {
+  display: grid;
+  gap: 10px;
+}
+
+.message-edit-textarea {
+  width: 100%;
+  min-height: 110px;
+  resize: vertical;
+  border: 1px solid #d9d9de;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #ffffff;
+  color: #202123;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.message-edit-textarea:focus {
+  border-color: #8e8e93;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(32, 33, 35, 0.1);
+}
+
+.message-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.message-edit-actions .button {
+  min-height: 32px;
+  padding: 0 11px;
+  font-size: 0.8rem;
+}
+
 .chat-empty {
   display: grid;
   gap: 4px;

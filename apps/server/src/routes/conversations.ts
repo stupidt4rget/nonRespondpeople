@@ -4,6 +4,7 @@ import type {
   CharacterConversationResponse,
   ChatMessageDto,
   ConversationDto,
+  UpdateChatMessageRequest,
   UpdateConversationWorldBooksRequest,
 } from '@roleagent/shared';
 import { prisma } from '../db/prisma.js';
@@ -79,6 +80,22 @@ async function seedFirstMessageIfNeeded(
   });
 }
 
+export async function ensureConversationReady(
+  conversation: Conversation,
+  character: ConversationCharacter,
+): Promise<Conversation> {
+  let ready = conversation;
+  if (ready.activeWorldBookIdsJson === null) {
+    const defaultIds = await getDefaultWorldBookIds(character.id);
+    ready = await prisma.conversation.update({
+      where: { id: ready.id },
+      data: { activeWorldBookIdsJson: stringifyWorldBookIds(defaultIds) },
+    });
+  }
+  await seedFirstMessageIfNeeded(ready, character);
+  return ready;
+}
+
 export async function getOrCreateCharacterConversation(
   character: ConversationCharacter,
 ): Promise<Conversation> {
@@ -87,18 +104,7 @@ export async function getOrCreateCharacterConversation(
     orderBy: { createdAt: 'asc' },
   });
   if (existing) {
-    let conversation = existing;
-    if (existing.activeWorldBookIdsJson !== null) {
-      await seedFirstMessageIfNeeded(conversation, character);
-      return conversation;
-    }
-    const defaultIds = await getDefaultWorldBookIds(character.id);
-    conversation = await prisma.conversation.update({
-      where: { id: existing.id },
-      data: { activeWorldBookIdsJson: stringifyWorldBookIds(defaultIds) },
-    });
-    await seedFirstMessageIfNeeded(conversation, character);
-    return conversation;
+    return ensureConversationReady(existing, character);
   }
 
   const defaultIds = await getDefaultWorldBookIds(character.id);
@@ -132,7 +138,7 @@ async function assertWorldBooksExist(ids: string[]): Promise<void> {
   }
 }
 
-async function buildConversationResponse(
+export async function buildConversationResponse(
   conversation: Conversation,
 ): Promise<CharacterConversationResponse> {
   const messages = await getConversationMessages(conversation.id);
@@ -167,6 +173,81 @@ export async function conversationRoutes(app: FastifyInstance) {
     }
     const conversation = await getOrCreateCharacterConversation(character);
     return buildConversationResponse(conversation);
+  });
+
+  app.patch('/api/conversations/:conversationId/messages/:messageId', async (req, reply) => {
+    const { conversationId, messageId } = req.params as {
+      conversationId: string;
+      messageId: string;
+    };
+    if (!isPlainObject(req.body)) {
+      return reply.code(400).send({ error: 'request body must be an object' });
+    }
+    const { content } = req.body as UpdateChatMessageRequest;
+    if (typeof content !== 'string' || content.trim() === '') {
+      return reply
+        .code(400)
+        .send({ error: 'content is required and must be a non-empty string' });
+    }
+
+    const conversation = await prisma.conversation.findUnique({
+      where: { id: conversationId },
+    });
+    if (!conversation) {
+      return reply.code(404).send({ error: 'conversation not found' });
+    }
+    const message = await prisma.chatMessage.findFirst({
+      where: { id: messageId, conversationId },
+    });
+    if (!message) {
+      return reply.code(404).send({ error: 'message not found' });
+    }
+
+    await prisma.chatMessage.update({
+      where: { id: message.id },
+      data: { content: content.trim() },
+    });
+    return buildConversationResponse(conversation);
+  });
+
+  app.delete('/api/conversations/:conversationId/messages/:messageId', async (req, reply) => {
+    const { conversationId, messageId } = req.params as {
+      conversationId: string;
+      messageId: string;
+    };
+    const conversation = await prisma.conversation.findUnique({
+      where: { id: conversationId },
+    });
+    if (!conversation) {
+      return reply.code(404).send({ error: 'conversation not found' });
+    }
+    const message = await prisma.chatMessage.findFirst({
+      where: { id: messageId, conversationId },
+    });
+    if (!message) {
+      return reply.code(404).send({ error: 'message not found' });
+    }
+
+    await prisma.chatMessage.delete({ where: { id: message.id } });
+    return buildConversationResponse(conversation);
+  });
+
+  app.delete('/api/conversations/:id/messages', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const conversation = await prisma.conversation.findUnique({
+      where: { id },
+      include: { character: true },
+    });
+    if (!conversation) {
+      return reply.code(404).send({ error: 'conversation not found' });
+    }
+
+    await prisma.chatMessage.deleteMany({ where: { conversationId: id } });
+    const readyConversation = await ensureConversationReady(
+      conversation,
+      conversation.character,
+    );
+    return buildConversationResponse(readyConversation);
   });
 
   app.patch('/api/conversations/:id/worldbooks', async (req, reply) => {
