@@ -8,6 +8,11 @@ import type {
 } from '@roleagent/shared';
 import { prisma } from '../db/prisma.js';
 import { getDefaultWorldBookIds } from './worldbooks.js';
+import { substituteMacros, type PromptCharacter } from '../services/promptBuilder.js';
+
+interface ConversationCharacter extends PromptCharacter {
+  id: string;
+}
 
 function isPlainObject(value: unknown): value is object {
   return (
@@ -53,31 +58,58 @@ export function toChatMessageDto(message: ChatMessage): ChatMessageDto {
   };
 }
 
+async function seedFirstMessageIfNeeded(
+  conversation: Conversation,
+  character: ConversationCharacter,
+): Promise<void> {
+  if (!character.firstMessage || character.firstMessage.trim() === '') return;
+  const messageCount = await prisma.chatMessage.count({
+    where: { conversationId: conversation.id },
+  });
+  if (messageCount > 0) return;
+
+  const content = substituteMacros(character.firstMessage, character).trim();
+  if (content === '') return;
+  await prisma.chatMessage.create({
+    data: {
+      conversationId: conversation.id,
+      role: 'assistant',
+      content,
+    },
+  });
+}
+
 export async function getOrCreateCharacterConversation(
-  characterId: string,
+  character: ConversationCharacter,
 ): Promise<Conversation> {
   const existing = await prisma.conversation.findFirst({
-    where: { characterId },
+    where: { characterId: character.id },
     orderBy: { createdAt: 'asc' },
   });
   if (existing) {
+    let conversation = existing;
     if (existing.activeWorldBookIdsJson !== null) {
-      return existing;
+      await seedFirstMessageIfNeeded(conversation, character);
+      return conversation;
     }
-    const defaultIds = await getDefaultWorldBookIds(characterId);
-    return prisma.conversation.update({
+    const defaultIds = await getDefaultWorldBookIds(character.id);
+    conversation = await prisma.conversation.update({
       where: { id: existing.id },
       data: { activeWorldBookIdsJson: stringifyWorldBookIds(defaultIds) },
     });
+    await seedFirstMessageIfNeeded(conversation, character);
+    return conversation;
   }
 
-  const defaultIds = await getDefaultWorldBookIds(characterId);
-  return prisma.conversation.create({
+  const defaultIds = await getDefaultWorldBookIds(character.id);
+  const conversation = await prisma.conversation.create({
     data: {
-      characterId,
+      characterId: character.id,
       activeWorldBookIdsJson: stringifyWorldBookIds(defaultIds),
     },
   });
+  await seedFirstMessageIfNeeded(conversation, character);
+  return conversation;
 }
 
 export async function getConversationMessages(
@@ -133,7 +165,7 @@ export async function conversationRoutes(app: FastifyInstance) {
     if (!character) {
       return reply.code(404).send({ error: 'character not found' });
     }
-    const conversation = await getOrCreateCharacterConversation(id);
+    const conversation = await getOrCreateCharacterConversation(character);
     return buildConversationResponse(conversation);
   });
 

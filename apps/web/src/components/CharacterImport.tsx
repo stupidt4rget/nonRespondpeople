@@ -94,10 +94,13 @@ function mapCardToImport(card: unknown): ImportCharacterCardRequest {
     name,
     description: getStr('description'),
     persona: getStr('persona'),
+    personality: getStr('personality'),
     scenario: getStr('scenario'),
     firstMessage: getStr('first_mes') ?? getStr('firstMessage'),
     messageExample: getStr('mes_example') ?? getStr('messageExample'),
     systemPrompt: getStr('system_prompt') ?? getStr('systemPrompt'),
+    postHistoryInstructions:
+      getStr('post_history_instructions') ?? getStr('postHistoryInstructions'),
     rawCardJson: JSON.stringify(card),
     characterBook:
       (r.character_book ?? (card as { character_book?: unknown }).character_book) ??

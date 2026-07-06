@@ -40,19 +40,7 @@ export function ChatPanel({
       .then((res) => {
         if (cancelled) return;
         onConversationReady(res.conversation.id, res.activeWorldBookIds);
-        if (res.messages.length > 0) {
-          setMessages(res.messages);
-        } else if (character.firstMessage) {
-          setMessages([
-            {
-              role: 'assistant',
-              content: character.firstMessage,
-              createdAt: new Date().toISOString(),
-            },
-          ]);
-        } else {
-          setMessages([]);
-        }
+        setMessages(res.messages);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -64,7 +52,7 @@ export function ChatPanel({
     return () => {
       cancelled = true;
     };
-  }, [character.id, character.firstMessage, onConversationReady]);
+  }, [character.id, onConversationReady]);
 
   const handleSend = async (e: FormEvent) => {
     e.preventDefault();

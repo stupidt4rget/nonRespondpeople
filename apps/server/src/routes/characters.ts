@@ -21,10 +21,12 @@ function toCharacterDto(character: Character): CharacterDto {
     name: character.name,
     description: character.description,
     persona: character.persona,
+    personality: character.personality,
     scenario: character.scenario,
     firstMessage: character.firstMessage,
     messageExample: character.messageExample,
     systemPrompt: character.systemPrompt,
+    postHistoryInstructions: character.postHistoryInstructions,
     rawCardJson: character.rawCardJson,
     createdAt: character.createdAt.toISOString(),
     updatedAt: character.updatedAt.toISOString(),
@@ -55,10 +57,12 @@ function parseJson(value: string | null | undefined): unknown | null {
 const OPTIONAL_CARD_FIELDS = [
   'description',
   'persona',
+  'personality',
   'scenario',
   'firstMessage',
   'messageExample',
   'systemPrompt',
+  'postHistoryInstructions',
 ] as const;
 
 export async function characterRoutes(app: FastifyInstance) {
@@ -87,10 +91,12 @@ export async function characterRoutes(app: FastifyInstance) {
         name: body.name.trim(),
         description: strOrNull(body.description),
         persona: strOrNull(body.persona),
+        personality: strOrNull(body.personality),
         scenario: strOrNull(body.scenario),
         firstMessage: strOrNull(body.firstMessage),
         messageExample: strOrNull(body.messageExample),
         systemPrompt: strOrNull(body.systemPrompt),
+        postHistoryInstructions: strOrNull(body.postHistoryInstructions),
       },
     });
     return reply.code(201).send(toCharacterDto(created));
@@ -112,10 +118,12 @@ export async function characterRoutes(app: FastifyInstance) {
         name: body.name.trim(),
         description: strOrNull(body.description),
         persona: strOrNull(body.persona),
+        personality: strOrNull(body.personality),
         scenario: strOrNull(body.scenario),
         firstMessage: strOrNull(body.firstMessage),
         messageExample: strOrNull(body.messageExample),
         systemPrompt: strOrNull(body.systemPrompt),
+        postHistoryInstructions: strOrNull(body.postHistoryInstructions),
         rawCardJson: strOrNull(body.rawCardJson),
       },
     });
@@ -154,10 +162,12 @@ export async function characterRoutes(app: FastifyInstance) {
       name: found.name,
       description: found.description ?? undefined,
       persona: found.persona ?? undefined,
+      personality: found.personality ?? undefined,
       scenario: found.scenario ?? undefined,
       first_mes: found.firstMessage ?? undefined,
       mes_example: found.messageExample ?? undefined,
       system_prompt: found.systemPrompt ?? undefined,
+      post_history_instructions: found.postHistoryInstructions ?? undefined,
       character_book: rawCharacterBook ?? linkedRawBook ?? undefined,
     };
     return reply.send(body);
@@ -223,10 +233,12 @@ export async function characterRoutes(app: FastifyInstance) {
       name?: string;
       description?: string | null;
       persona?: string | null;
+      personality?: string | null;
       scenario?: string | null;
       firstMessage?: string | null;
       messageExample?: string | null;
       systemPrompt?: string | null;
+      postHistoryInstructions?: string | null;
     } = {};
     if (typeof name === 'string') data.name = name.trim();
     for (const field of OPTIONAL_CARD_FIELDS) {

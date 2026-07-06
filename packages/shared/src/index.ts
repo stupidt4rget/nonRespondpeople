@@ -15,10 +15,12 @@ export interface CharacterDto {
   name: string;
   description: string | null;
   persona: string | null;
+  personality: string | null;
   scenario: string | null;
   firstMessage: string | null;
   messageExample: string | null;
   systemPrompt: string | null;
+  postHistoryInstructions: string | null;
   rawCardJson: string | null;
   createdAt: string;
   updatedAt: string;
@@ -28,10 +30,12 @@ export interface CreateCharacterRequest {
   name: string;
   description?: string;
   persona?: string;
+  personality?: string;
   scenario?: string;
   firstMessage?: string;
   messageExample?: string;
   systemPrompt?: string;
+  postHistoryInstructions?: string;
 }
 
 export interface CharactersResponse {
@@ -42,10 +46,12 @@ export interface UpdateCharacterRequest {
   name?: string;
   description?: string | null;
   persona?: string | null;
+  personality?: string | null;
   scenario?: string | null;
   firstMessage?: string | null;
   messageExample?: string | null;
   systemPrompt?: string | null;
+  postHistoryInstructions?: string | null;
 }
 
 export interface DeleteCharacterResponse {
@@ -91,10 +97,12 @@ export interface ImportCharacterCardRequest {
   name: string;
   description?: string;
   persona?: string;
+  personality?: string;
   scenario?: string;
   firstMessage?: string;
   messageExample?: string;
   systemPrompt?: string;
+  postHistoryInstructions?: string;
   rawCardJson?: string;
   characterBook?: unknown;
 }
@@ -105,10 +113,12 @@ export interface ExportCharacterCardResponse {
   name: string;
   description?: string;
   persona?: string;
+  personality?: string;
   scenario?: string;
   first_mes?: string;
   mes_example?: string;
   system_prompt?: string;
+  post_history_instructions?: string;
   character_book?: unknown;
 }
 
