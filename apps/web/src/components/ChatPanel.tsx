@@ -1,11 +1,11 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import type { CharacterDto, ChatMessageDto } from '@roleagent/shared';
 import {
   clearConversationMessages,
   deleteChatMessage,
   getCharacterConversation,
-  regenerateLastAssistant,
-  sendChat,
+  streamChat,
+  streamRegenerate,
   updateChatMessage,
 } from '../api';
 
@@ -35,16 +35,21 @@ export function ChatPanel({
   const [sending, setSending] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [streamingMode, setStreamingMode] = useState<'send' | 'regenerate' | null>(null);
   const [mutatingMessageId, setMutatingMessageId] = useState<string | null>(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const streamAbortControllerRef = useRef<AbortController | null>(null);
 
   const actionBusy =
-    sending || clearing || regenerating || mutatingMessageId !== null;
+    sending || clearing || regenerating || streamingMode !== null || mutatingMessageId !== null;
   const lastMessage = messages.at(-1);
   const lastAssistantMessageId =
     lastMessage?.role === 'assistant' ? lastMessage.id : null;
+
+  const isAbortError = (err: unknown): boolean =>
+    err instanceof Error && err.name === 'AbortError';
 
   useEffect(() => {
     let cancelled = false;
@@ -72,6 +77,12 @@ export function ChatPanel({
     };
   }, [character.id, onConversationReady]);
 
+  useEffect(() => {
+    return () => {
+      streamAbortControllerRef.current?.abort();
+    };
+  }, []);
+
   const handleSend = async (e: FormEvent) => {
     e.preventDefault();
     const text = input.trim();
@@ -81,6 +92,7 @@ export function ChatPanel({
     }
     setError(null);
     const pendingId = `pending-${Date.now()}`;
+    const pendingAssistantId = `pending-assistant-${Date.now()}`;
     const userMsg: ChatMessage = {
       id: pendingId,
       conversationId: conversationId ?? '',
@@ -88,29 +100,58 @@ export function ChatPanel({
       content: text,
       createdAt: new Date().toISOString(),
     };
-    setMessages((prev) => [...prev, userMsg]);
+    const assistantMsg: ChatMessage = {
+      id: pendingAssistantId,
+      conversationId: conversationId ?? '',
+      role: 'assistant',
+      content: '',
+      createdAt: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setInput('');
     setSending(true);
+    setStreamingMode('send');
+    const abortController = new AbortController();
+    streamAbortControllerRef.current = abortController;
     try {
-      const res = await sendChat({
-        characterId: character.id,
-        message: text,
-      });
-      if (res.conversation) {
-        onConversationReady(res.conversation.id, res.activeWorldBookIds ?? []);
-        setConversationId(res.conversation.id);
-      }
-      if (res.messages && res.messages.length > 0) {
-        setMessages(res.messages);
-      } else if (res.assistantMessage) {
-        const assistantMessage = res.assistantMessage;
-        setMessages((prev) => [...prev, assistantMessage]);
-      }
+      await streamChat(
+        {
+          characterId: character.id,
+          message: text,
+        },
+        {
+          signal: abortController.signal,
+          onEvent: (event) => {
+            if (event.type === 'delta') {
+              setMessages((prev) =>
+                prev.map((message) =>
+                  message.id === pendingAssistantId
+                    ? { ...message, content: `${message.content}${event.content}` }
+                    : message,
+                ),
+              );
+              return;
+            }
+            if (event.type === 'done') {
+              onConversationReady(event.conversation.id, event.activeWorldBookIds);
+              setConversationId(event.conversation.id);
+              setMessages(event.messages);
+            }
+          },
+        },
+      );
     } catch (err: unknown) {
       setMessages((prev) => prev.filter((message) => message.id !== pendingId));
-      setError(err instanceof Error ? err.message : String(err));
+      setMessages((prev) =>
+        prev.filter((message) => message.id !== pendingAssistantId),
+      );
+      if (!isAbortError(err)) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
       setSending(false);
+      setStreamingMode(null);
+      streamAbortControllerRef.current = null;
     }
   };
 
@@ -186,20 +227,63 @@ export function ChatPanel({
 
   const handleRegenerate = async () => {
     if (!conversationId || actionBusy || !lastAssistantMessageId) return;
+    const originalMessage = messages.find((message) => message.id === lastAssistantMessageId);
+    if (!originalMessage) return;
     setError(null);
     setRegenerating(true);
+    setStreamingMode('regenerate');
+    const abortController = new AbortController();
+    streamAbortControllerRef.current = abortController;
+    let partialContent = '';
+    setMessages((prev) =>
+      prev.map((message) =>
+        message.id === lastAssistantMessageId
+          ? { ...message, content: '' }
+          : message,
+      ),
+    );
     try {
-      const res = await regenerateLastAssistant(conversationId);
-      onConversationReady(res.conversation.id, res.activeWorldBookIds);
-      setConversationId(res.conversation.id);
-      setMessages(res.messages);
-      setEditingMessageId(null);
-      setEditContent('');
+      await streamRegenerate(conversationId, {
+        signal: abortController.signal,
+        onEvent: (event) => {
+          if (event.type === 'delta') {
+            partialContent += event.content;
+            setMessages((prev) =>
+              prev.map((message) =>
+                message.id === lastAssistantMessageId
+                  ? { ...message, content: partialContent }
+                  : message,
+              ),
+            );
+            return;
+          }
+          if (event.type === 'done') {
+            onConversationReady(event.conversation.id, event.activeWorldBookIds);
+            setConversationId(event.conversation.id);
+            setMessages(event.messages);
+            setEditingMessageId(null);
+            setEditContent('');
+          }
+        },
+      });
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === originalMessage.id ? originalMessage : message,
+        ),
+      );
+      if (!isAbortError(err)) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
       setRegenerating(false);
+      setStreamingMode(null);
+      streamAbortControllerRef.current = null;
     }
+  };
+
+  const handleStopStreaming = () => {
+    streamAbortControllerRef.current?.abort();
   };
 
   return (
@@ -339,6 +423,15 @@ export function ChatPanel({
         <button className="button button--primary" type="submit" disabled={actionBusy}>
           {sending ? '发送中...' : '发送'}
         </button>
+        {streamingMode !== null && (
+          <button
+            className="button button--danger"
+            type="button"
+            onClick={handleStopStreaming}
+          >
+            Stop
+          </button>
+        )}
         {error !== null && <p className="notice notice--error">{error}</p>}
       </form>
     </section>
