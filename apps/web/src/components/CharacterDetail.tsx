@@ -159,7 +159,9 @@ export function CharacterDetail({
       <div className={`detail-grid${textExpanded ? ' detail-grid--expanded' : ''}`}>
         <section className="detail-card">
           <h3>人格</h3>
-          <p className="detail-text">{character.persona ?? '暂无人格设定。'}</p>
+          <p className="detail-text">
+            {character.personality ?? character.persona ?? '暂无人格设定。'}
+          </p>
         </section>
         <section className="detail-card">
           <h3>场景</h3>
@@ -175,6 +177,12 @@ export function CharacterDetail({
           <h3>系统提示</h3>
           <p className="detail-text">
             {character.systemPrompt ?? '暂无系统提示。'}
+          </p>
+        </section>
+        <section className="detail-card">
+          <h3>后置指令</h3>
+          <p className="detail-text">
+            {character.postHistoryInstructions ?? '暂无后置指令。'}
           </p>
         </section>
       </div>

@@ -8,17 +8,19 @@ datasource db {
 }
 
 model Character {
-  id             String   @id @default(cuid())
-  name           String
-  description    String?
-  persona        String?
-  scenario       String?
-  firstMessage   String?
-  messageExample String?
-  systemPrompt   String?
-  rawCardJson    String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                      String   @id @default(cuid())
+  name                    String
+  description             String?
+  persona                 String?
+  personality             String?
+  scenario                String?
+  firstMessage            String?
+  messageExample          String?
+  systemPrompt            String?
+  postHistoryInstructions String?
+  rawCardJson             String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
 
   worldBookLinks CharacterWorldBook[]
   conversations  Conversation[]
