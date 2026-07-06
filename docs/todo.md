@@ -17,6 +17,15 @@
 - [ ] CI workflow + pre-commit hooks.
 - [ ] Test runner + fixtures.
 
+## V0.10.1 quality fixes (from docs/sillytavern-research.md roadmap)
+- [ ] SSE streaming for /api/chat (server forwards stream:true; web renders tokens incrementally).
+- [ ] Stop generation (AbortController through web -> server -> LLM request).
+- [ ] Message edit / delete API + UI.
+- [ ] Regenerate (delete last assistant message, rebuild prompt, reuse chat pipeline).
+- [ ] Prompt debug: expose PromptDebugInfo via API + "view last prompt" panel in web.
+- [ ] LLM settings persistence (survive restart; apiKey never returned to the client).
+- [ ] Optional: squash consecutive system messages toggle for strict OpenAI-compatible APIs.
+
 ## V0.8 follow-up notes
 - [x] Worldbook + chat persistence V0.8: persisted per-character default conversations, saved chat messages, worldbook import/export, role-card JSON export, character_book auto-binding, and Chinese UI.
 - [ ] Later: multiple conversation UI per character.

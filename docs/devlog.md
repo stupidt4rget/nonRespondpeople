@@ -107,7 +107,12 @@
 - Verified: pnpm typecheck pass; pnpm build pass (35 modules). API tests: POST /import 201 with new fields; GET /:id returns new fields; PATCH persona 200; POST /chat no config 500; POST /chat nonexistent 404.
 - Untouched: apps/server/src/index.ts, apps/server/src/db/prisma.ts, package.json, pnpm-lock.yaml, AGENTS.md, tsconfig.base.json, pnpm-workspace.yaml; no Git commit.
 
-## 2026-07-05 - Worldbook + chat persistence + CN UI V0.8
+## 2026-07-06 - SillyTavern architecture research doc
+- Added docs/sillytavern-research.md: read-only research of the SillyTavern codebase (architecture, module inventory, feature matrix vs RoleAgent dev HEAD 746ed9f, gap analysis, roadmap proposal, license notes).
+- Research method: behavior/spec observation only; no SillyTavern code copied (AGPL-3.0 clean-room constraint documented in section 6 of the report).
+- Roadmap outcome adopted for next phase (V0.10.1 quality fixes): SSE streaming + abort, message edit/delete, regenerate, prompt debug API + panel, LLM settings persistence, squash consecutive system messages. Items registered in docs/todo.md.
+- Decision recorded: continue in-house development (RoleAgent Tavern); SillyTavern fork / repackaging route evaluated and rejected (AGPL lock-in, no iOS path, upstream merge burden, UI rewrite equals rewriting most of ST).
+- Doc-only change: no code, no schema, no deps.
 - Prisma: added WorldBook, CharacterWorldBook, Conversation, and ChatMessage models. Migration `20260705093000_add_worldbooks_chat_persistence` creates tables, indexes, cascade cleanup for character-bound conversation/message/binding data, and a ChatMessage role check limited to user/assistant.
 - Shared: added worldbook, conversation, chat message, character export, and worldbook binding DTO/request/response types. ChatResponse still keeps `reply` while adding saved message/conversation metadata.
 - Server: added `routes/worldbooks.ts` for list/import/export/delete worldbooks and character-worldbook bindings; added `routes/conversations.ts` for default per-character conversation loading and active worldbook multi-select updates.
