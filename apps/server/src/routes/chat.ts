@@ -7,7 +7,7 @@ import type {
 } from '@roleagent/shared';
 import type { Character, Conversation, WorldBook } from '@prisma/client';
 import { prisma } from '../db/prisma.js';
-import { getActiveLlmSettings } from './settings.js';
+import { getActiveLlmSettings, getActivePromptSettings } from './settings.js';
 import {
   ensureConversationReady,
   getConversationMessages,
@@ -313,6 +313,7 @@ export async function chatRoutes(app: FastifyInstance) {
       worldBooks,
     } = await loadPromptContext(found, createdConversation);
     const savedMessages = await getConversationMessages(conversation.id);
+    const promptSettings = await getActivePromptSettings();
 
     const prompt = buildPromptMessages({
       character: found,
@@ -322,6 +323,7 @@ export async function chatRoutes(app: FastifyInstance) {
         content: m.content,
       })),
       userMessage: message.trim(),
+      promptSettings,
     });
     const messages = prompt.messages;
     if (process.env.ROLEAGENT_PROMPT_DEBUG === '1') {
@@ -405,6 +407,7 @@ export async function chatRoutes(app: FastifyInstance) {
       worldBooks,
     } = await loadPromptContext(found, createdConversation);
     const savedMessages = await getConversationMessages(conversation.id);
+    const promptSettings = await getActivePromptSettings();
 
     const prompt = buildPromptMessages({
       character: found,
@@ -414,6 +417,7 @@ export async function chatRoutes(app: FastifyInstance) {
         content: m.content,
       })),
       userMessage: message.trim(),
+      promptSettings,
     });
     if (process.env.ROLEAGENT_PROMPT_DEBUG === '1') {
       app.log.info({ prompt: prompt.debug }, 'prompt builder summary');
@@ -522,11 +526,13 @@ export async function chatRoutes(app: FastifyInstance) {
       role: m.role === 'user' ? 'user' as const : 'assistant' as const,
       content: m.content,
     }));
+    const promptSettings = await getActivePromptSettings();
     const prompt = buildPromptMessages({
       character: existing.character,
       worldBooks,
       history,
       userMessage: previousMessage.content,
+      promptSettings,
     });
     if (process.env.ROLEAGENT_PROMPT_DEBUG === '1') {
       app.log.info({ prompt: prompt.debug }, 'prompt builder summary');
@@ -596,11 +602,13 @@ export async function chatRoutes(app: FastifyInstance) {
       role: m.role === 'user' ? 'user' as const : 'assistant' as const,
       content: m.content,
     }));
+    const promptSettings = await getActivePromptSettings();
     const prompt = buildPromptMessages({
       character: existing.character,
       worldBooks,
       history,
       userMessage: previousMessage.content,
+      promptSettings,
     });
     if (process.env.ROLEAGENT_PROMPT_DEBUG === '1') {
       app.log.info({ prompt: prompt.debug }, 'prompt builder summary');
