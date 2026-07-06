@@ -126,6 +126,28 @@ export interface LlmSettingsStatusResponse {
   hasApiKey: boolean;
 }
 
+export interface PromptSettingsDto {
+  roleplayPreset: string;
+  userPersona: string | null;
+  authorsNote: string | null;
+  userName: string;
+  maxPromptChars: number;
+  historyBudgetChars: number;
+  worldBookBudgetChars: number;
+  worldBookScanDepth: number;
+}
+
+export interface PromptSettingsRequest {
+  roleplayPreset?: string;
+  userPersona?: string | null;
+  authorsNote?: string | null;
+  userName?: string;
+  maxPromptChars?: number;
+  historyBudgetChars?: number;
+  worldBookBudgetChars?: number;
+  worldBookScanDepth?: number;
+}
+
 export interface ImportCharacterCardRequest {
   name: string;
   description?: string;

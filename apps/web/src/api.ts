@@ -11,6 +11,8 @@
   ImportCharacterCardRequest,
   LlmSettingsRequest,
   LlmSettingsStatusResponse,
+  PromptSettingsDto,
+  PromptSettingsRequest,
   ExportCharacterCardResponse,
   WorldBookDto,
   WorldBooksResponse,
@@ -140,6 +142,38 @@ export async function saveLlmSettings(
     return throwApiError(res);
   }
   return (await res.json()) as LlmSettingsStatusResponse;
+}
+
+export async function getPromptSettings(): Promise<PromptSettingsDto> {
+  const res = await fetch('/api/settings/prompt');
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as PromptSettingsDto;
+}
+
+export async function updatePromptSettings(
+  body: PromptSettingsRequest,
+): Promise<PromptSettingsDto> {
+  const res = await fetch('/api/settings/prompt', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as PromptSettingsDto;
+}
+
+export async function resetPromptSettings(): Promise<PromptSettingsDto> {
+  const res = await fetch('/api/settings/prompt/reset', {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as PromptSettingsDto;
 }
 
 export async function exportCharacterCard(

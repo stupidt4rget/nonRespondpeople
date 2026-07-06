@@ -1,3 +1,5 @@
+import type { PromptSettingsDto } from '@roleagent/shared';
+
 export type PromptRole = 'system' | 'user' | 'assistant';
 
 export interface PromptMessage {
@@ -28,11 +30,14 @@ export interface PromptBuilderInput {
   worldBooks: PromptWorldBook[];
   history: Array<{ role: 'user' | 'assistant'; content: string }>;
   userMessage: string;
+  promptSettings?: PromptSettingsDto;
   userName?: string;
   limits?: {
     maxPromptChars?: number;
+    historyBudgetChars?: number;
     worldBookMaxChars?: number;
     examplesMaxChars?: number;
+    worldBookScanDepth?: number;
   };
 }
 
@@ -57,6 +62,7 @@ export interface PromptBuilderOutput {
 interface MacroValues {
   char: string;
   user: string;
+  persona: string;
   description: string;
   personality: string;
   scenario: string;
@@ -73,8 +79,10 @@ interface ParsedWorldBookEntry {
 }
 
 const DEFAULT_MAX_PROMPT_CHARS = 24000;
+const DEFAULT_HISTORY_BUDGET_CHARS = 12000;
 const DEFAULT_WORLDBOOK_MAX_CHARS = 6000;
 const DEFAULT_EXAMPLES_MAX_CHARS = 4000;
+const DEFAULT_WORLDBOOK_SCAN_DEPTH = 3;
 const BASE_INSTRUCTION_TEMPLATE = [
   'You are roleplaying as {{char}}.',
   'You are only {{char}}.',
@@ -85,6 +93,16 @@ const BASE_INSTRUCTION_TEMPLATE = [
 ].join('\n');
 const ROLE_BOUNDARY_REMINDER_TEMPLATE =
   "Remember: reply only as {{char}}. Do not write {{user}}'s words, thoughts, or actions.";
+const DEFAULT_PROMPT_SETTINGS: PromptSettingsDto = {
+  roleplayPreset: BASE_INSTRUCTION_TEMPLATE,
+  userPersona: null,
+  authorsNote: null,
+  userName: 'User',
+  maxPromptChars: DEFAULT_MAX_PROMPT_CHARS,
+  historyBudgetChars: DEFAULT_HISTORY_BUDGET_CHARS,
+  worldBookBudgetChars: DEFAULT_WORLDBOOK_MAX_CHARS,
+  worldBookScanDepth: DEFAULT_WORLDBOOK_SCAN_DEPTH,
+};
 
 function normalizeOptionalText(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null;
@@ -111,7 +129,11 @@ function buildMessageOutline(messages: PromptMessage[]): PromptDebugInfo['messag
   }));
 }
 
-function buildMacroValues(character: PromptCharacter, userName: string): MacroValues {
+function buildMacroValues(
+  character: PromptCharacter,
+  userName: string,
+  userPersona: string,
+): MacroValues {
   const personality =
     normalizeOptionalText(character.personality) ??
     normalizeOptionalText(character.persona) ??
@@ -119,6 +141,7 @@ function buildMacroValues(character: PromptCharacter, userName: string): MacroVa
   return {
     char: character.name,
     user: userName,
+    persona: userPersona,
     description: normalizeOptionalText(character.description) ?? '',
     personality,
     scenario: normalizeOptionalText(character.scenario) ?? '',
@@ -129,12 +152,14 @@ export function substituteMacros(
   value: string,
   character: PromptCharacter,
   userName = 'User',
+  userPersona = '',
 ): string {
   const now = new Date();
-  const macros = buildMacroValues(character, userName);
+  const macros = buildMacroValues(character, userName, userPersona);
   return value
     .replaceAll('{{char}}', macros.char)
     .replaceAll('{{user}}', macros.user)
+    .replaceAll('{{persona}}', macros.persona)
     .replaceAll('{{description}}', macros.description)
     .replaceAll('{{personality}}', macros.personality)
     .replaceAll('{{scenario}}', macros.scenario)
@@ -142,9 +167,19 @@ export function substituteMacros(
     .replaceAll('{{time}}', now.toLocaleTimeString());
 }
 
-function systemMessage(content: string | null, character: PromptCharacter, userName: string): PromptMessage | null {
+function systemMessage(
+  content: string | null,
+  character: PromptCharacter,
+  userName: string,
+  userPersona: string,
+): PromptMessage | null {
   if (!content) return null;
-  const rendered = substituteMacros(content, character, userName).trim();
+  const rendered = substituteMacros(
+    content,
+    character,
+    userName,
+    userPersona,
+  ).trim();
   return rendered.length > 0 ? { role: 'system', content: rendered } : null;
 }
 
@@ -245,13 +280,17 @@ function parseWorldBookEntries(worldBooks: PromptWorldBook[]): ParsedWorldBookEn
 function buildWorldBookBlock(args: {
   character: PromptCharacter;
   userName: string;
+  userPersona: string;
   worldBooks: PromptWorldBook[];
   history: Array<{ role: 'user' | 'assistant'; content: string }>;
   userMessage: string;
   maxChars: number;
+  scanDepth: number;
 }): { message: PromptMessage | null; activatedCount: number } {
+  const scanDepth = Math.max(0, args.scanDepth);
+  const recentHistory = scanDepth > 0 ? args.history.slice(-scanDepth) : [];
   const scanText = [
-    ...args.history.slice(-3).map((message) => message.content),
+    ...recentHistory.map((message) => message.content),
     args.userMessage,
   ].join('\n').toLowerCase();
 
@@ -271,7 +310,12 @@ function buildWorldBookBlock(args: {
     const title = entry.label
       ? `Worldbook: ${entry.worldBookName} / ${entry.label}`
       : `Worldbook: ${entry.worldBookName}`;
-    const rendered = substituteMacros(entry.content, args.character, args.userName);
+    const rendered = substituteMacros(
+      entry.content,
+      args.character,
+      args.userName,
+      args.userPersona,
+    );
     const chunk = `${title}\n${rendered}`;
     if (total + chunk.length > args.maxChars) {
       if (chunks.length === 0) {
@@ -325,6 +369,7 @@ function parseExampleBlock(
   block: string,
   character: PromptCharacter,
   userName: string,
+  userPersona: string,
 ): PromptMessage[] {
   const messages: PromptMessage[] = [];
   const lines = block.split(/\r?\n/);
@@ -334,7 +379,12 @@ function parseExampleBlock(
     if (match) {
       const role = lineSpeakerRole(match[1] ?? '', character, userName);
       if (role === 'user' || role === 'assistant') {
-        const content = substituteMacros(match[2] ?? '', character, userName).trim();
+        const content = substituteMacros(
+          match[2] ?? '',
+          character,
+          userName,
+          userPersona,
+        ).trim();
         if (content !== '') {
           messages.push({ role, content });
         }
@@ -342,7 +392,12 @@ function parseExampleBlock(
       }
     }
 
-    const rendered = substituteMacros(line, character, userName).trim();
+    const rendered = substituteMacros(
+      line,
+      character,
+      userName,
+      userPersona,
+    ).trim();
     if (rendered === '') continue;
     const last = messages.at(-1);
     if (last) {
@@ -361,6 +416,7 @@ function hasMeaningfulFallbackExample(value: string): boolean {
 function buildExampleMessages(
   character: PromptCharacter,
   userName: string,
+  userPersona: string,
   maxChars: number,
 ): PromptMessage[] {
   const raw = normalizeOptionalText(character.messageExample);
@@ -380,8 +436,13 @@ function buildExampleMessages(
   ];
   let total = 0;
   for (const block of blocks) {
-    const parsed = parseExampleBlock(block, character, userName);
-    const fallbackContent = substituteMacros(block, character, userName).trim();
+    const parsed = parseExampleBlock(block, character, userName, userPersona);
+    const fallbackContent = substituteMacros(
+      block,
+      character,
+      userName,
+      userPersona,
+    ).trim();
     const blockMessages =
       parsed.length > 0
         ? parsed
@@ -415,6 +476,9 @@ function buildExampleMessages(
 function trimHistory(
   history: Array<{ role: 'user' | 'assistant'; content: string }>,
   remainingChars: number,
+  character: PromptCharacter,
+  userName: string,
+  userPersona: string,
 ): { messages: PromptMessage[]; dropped: number } {
   const selected: PromptMessage[] = [];
   let used = 0;
@@ -423,12 +487,18 @@ function trimHistory(
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const message = history[index];
     if (!message) continue;
-    const cost = message.content.length;
+    const content = substituteMacros(
+      message.content,
+      character,
+      userName,
+      userPersona,
+    );
+    const cost = content.length;
     if (used + cost > remainingChars) {
       dropped += 1;
       continue;
     }
-    selected.push({ role: message.role, content: message.content });
+    selected.push({ role: message.role, content });
     used += cost;
   }
 
@@ -436,21 +506,40 @@ function trimHistory(
 }
 
 export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOutput {
-  const userName = input.userName ?? 'User';
+  const promptSettings = input.promptSettings ?? DEFAULT_PROMPT_SETTINGS;
+  const userName = input.userName ?? promptSettings.userName ?? 'User';
+  const userPersona = normalizeOptionalText(promptSettings.userPersona) ?? '';
   const limits = {
-    maxPromptChars: input.limits?.maxPromptChars ?? DEFAULT_MAX_PROMPT_CHARS,
-    worldBookMaxChars: input.limits?.worldBookMaxChars ?? DEFAULT_WORLDBOOK_MAX_CHARS,
+    maxPromptChars:
+      input.limits?.maxPromptChars ??
+      promptSettings.maxPromptChars ??
+      DEFAULT_MAX_PROMPT_CHARS,
+    historyBudgetChars:
+      input.limits?.historyBudgetChars ??
+      promptSettings.historyBudgetChars ??
+      DEFAULT_HISTORY_BUDGET_CHARS,
+    worldBookMaxChars:
+      input.limits?.worldBookMaxChars ??
+      promptSettings.worldBookBudgetChars ??
+      DEFAULT_WORLDBOOK_MAX_CHARS,
     examplesMaxChars: input.limits?.examplesMaxChars ?? DEFAULT_EXAMPLES_MAX_CHARS,
+    worldBookScanDepth:
+      input.limits?.worldBookScanDepth ??
+      promptSettings.worldBookScanDepth ??
+      DEFAULT_WORLDBOOK_SCAN_DEPTH,
   };
 
   const characterSections: string[] = ['base'];
   const personality =
     normalizeOptionalText(input.character.personality) ??
     normalizeOptionalText(input.character.persona);
+  const baseTemplate =
+    normalizeOptionalText(promptSettings.roleplayPreset) ?? BASE_INSTRUCTION_TEMPLATE;
   const baseInstruction = substituteMacros(
-    BASE_INSTRUCTION_TEMPLATE,
+    baseTemplate,
     input.character,
     userName,
+    userPersona,
   );
   const fixedMessages: PromptMessage[] = [
     {
@@ -459,11 +548,23 @@ export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOut
     },
   ];
 
+  const personaMessage = systemMessage(
+    userPersona ? `User persona:\n${userPersona}` : null,
+    input.character,
+    userName,
+    userPersona,
+  );
+  if (personaMessage) {
+    fixedMessages.push(personaMessage);
+    characterSections.push('userPersona');
+  }
+
   const rawSystemPrompt = normalizeOptionalText(input.character.systemPrompt);
   const systemPrompt = systemMessage(
     rawSystemPrompt?.replaceAll('{{original}}', baseInstruction) ?? null,
     input.character,
     userName,
+    userPersona,
   );
   if (systemPrompt) {
     fixedMessages.push(systemPrompt);
@@ -474,13 +575,19 @@ export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOut
     normalizeOptionalText(input.character.description),
     input.character,
     userName,
+    userPersona,
   );
   if (description) {
     fixedMessages.push(description);
     characterSections.push('description');
   }
 
-  const personalityMessage = systemMessage(personality, input.character, userName);
+  const personalityMessage = systemMessage(
+    personality,
+    input.character,
+    userName,
+    userPersona,
+  );
   if (personalityMessage) {
     fixedMessages.push(personalityMessage);
     characterSections.push(
@@ -492,6 +599,7 @@ export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOut
     normalizeOptionalText(input.character.scenario),
     input.character,
     userName,
+    userPersona,
   );
   if (scenario) {
     fixedMessages.push(scenario);
@@ -501,28 +609,45 @@ export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOut
   const worldBook = buildWorldBookBlock({
     character: input.character,
     userName,
+    userPersona,
     worldBooks: input.worldBooks,
     history: input.history,
     userMessage: input.userMessage,
     maxChars: limits.worldBookMaxChars,
+    scanDepth: limits.worldBookScanDepth,
   });
   if (worldBook.message) fixedMessages.push(worldBook.message);
 
   const examples = buildExampleMessages(
     input.character,
     userName,
+    userPersona,
     limits.examplesMaxChars,
   );
   fixedMessages.push(...examples);
 
   const currentUserMessage: PromptMessage = {
     role: 'user',
-    content: substituteMacros(input.userMessage, input.character, userName),
+    content: substituteMacros(
+      input.userMessage,
+      input.character,
+      userName,
+      userPersona,
+    ),
   };
+  const authorsNote = systemMessage(
+    normalizeOptionalText(promptSettings.authorsNote)
+      ? `Author's Note:\n${promptSettings.authorsNote}`
+      : null,
+    input.character,
+    userName,
+    userPersona,
+  );
   const postHistory = systemMessage(
     normalizeOptionalText(input.character.postHistoryInstructions),
     input.character,
     userName,
+    userPersona,
   );
   const roleBoundaryReminder: PromptMessage = {
     role: 'system',
@@ -530,23 +655,35 @@ export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOut
       ROLE_BOUNDARY_REMINDER_TEMPLATE,
       input.character,
       userName,
+      userPersona,
     ),
   };
 
   const fixedCost =
     countMessageChars(fixedMessages) +
     currentUserMessage.content.length +
+    (authorsNote?.content.length ?? 0) +
     (postHistory?.content.length ?? 0) +
     roleBoundaryReminder.content.length;
-  const remainingForHistory = Math.max(0, limits.maxPromptChars - fixedCost);
-  const trimmedHistory = trimHistory(input.history, remainingForHistory);
+  const remainingForHistory = Math.max(
+    0,
+    Math.min(limits.historyBudgetChars, limits.maxPromptChars - fixedCost),
+  );
+  const trimmedHistory = trimHistory(
+    input.history,
+    remainingForHistory,
+    input.character,
+    userName,
+    userPersona,
+  );
 
   const messages = [
     ...fixedMessages,
     ...trimmedHistory.messages,
-    currentUserMessage,
+    ...(authorsNote ? [authorsNote] : []),
     ...(postHistory ? [postHistory] : []),
     roleBoundaryReminder,
+    currentUserMessage,
   ];
 
   return {

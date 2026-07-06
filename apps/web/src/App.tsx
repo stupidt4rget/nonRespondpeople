@@ -6,6 +6,7 @@ import { CharacterDetail } from './components/CharacterDetail';
 import { ChatPanel } from './components/ChatPanel';
 import { CharacterImport } from './components/CharacterImport';
 import { LlmSettings } from './components/LlmSettings';
+import { PromptSettings } from './components/PromptSettings';
 import { CollapsibleSection } from './components/CollapsibleSection';
 import { WorldBookPanel } from './components/WorldBookPanel';
 import './App.css';
@@ -242,6 +243,14 @@ export function App() {
               defaultOpen={false}
             >
               <LlmSettings />
+            </CollapsibleSection>
+
+            <CollapsibleSection
+              title="Prompt 设置"
+              eyebrow="生成"
+              defaultOpen={false}
+            >
+              <PromptSettings />
             </CollapsibleSection>
 
             <CollapsibleSection

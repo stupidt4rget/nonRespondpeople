@@ -77,3 +77,17 @@ model ChatMessage {
 
   @@index([conversationId, createdAt])
 }
+
+model PromptSettings {
+  id                   String   @id
+  roleplayPreset       String
+  userPersona          String?
+  authorsNote          String?
+  userName             String
+  maxPromptChars       Int
+  historyBudgetChars   Int
+  worldBookBudgetChars Int
+  worldBookScanDepth   Int
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
