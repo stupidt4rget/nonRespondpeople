@@ -6,6 +6,7 @@
   DeleteCharacterResponse,
   ChatRequest,
   ChatResponse,
+  ChatStreamEvent,
   RegenerateChatResponse,
   ImportCharacterCardRequest,
   LlmSettingsRequest,
@@ -301,4 +302,86 @@ export async function regenerateLastAssistant(
     return throwApiError(res);
   }
   return (await res.json()) as RegenerateChatResponse;
+}
+
+interface StreamRequestOptions {
+  signal?: AbortSignal;
+  onEvent: (event: ChatStreamEvent) => void;
+}
+
+async function readNdjsonStream(
+  res: Response,
+  onEvent: (event: ChatStreamEvent) => void,
+): Promise<void> {
+  if (!res.body) {
+    throw new Error('stream response body is not available');
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  const parseLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    const event = JSON.parse(trimmed) as ChatStreamEvent;
+    if (event.type === 'error') {
+      throw new Error(event.error);
+    }
+    onEvent(event);
+  };
+
+  try {
+    while (true) {
+      const result = await reader.read();
+      if (result.done) break;
+      buffer += decoder.decode(result.value, { stream: true });
+
+      let newlineIndex = buffer.indexOf('\n');
+      while (newlineIndex !== -1) {
+        const line = buffer.slice(0, newlineIndex);
+        buffer = buffer.slice(newlineIndex + 1);
+        parseLine(line);
+        newlineIndex = buffer.indexOf('\n');
+      }
+    }
+
+    buffer += decoder.decode();
+    parseLine(buffer);
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+export async function streamChat(
+  body: ChatRequest,
+  options: StreamRequestOptions,
+): Promise<void> {
+  const res = await fetch('/api/chat/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: options.signal,
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return readNdjsonStream(res, options.onEvent);
+}
+
+export async function streamRegenerate(
+  conversationId: string,
+  options: StreamRequestOptions,
+): Promise<void> {
+  const res = await fetch(
+    `/api/conversations/${encodeURIComponent(conversationId)}/regenerate/stream`,
+    {
+      method: 'POST',
+      signal: options.signal,
+    },
+  );
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return readNdjsonStream(res, options.onEvent);
 }

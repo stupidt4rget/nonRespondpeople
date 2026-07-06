@@ -87,6 +87,31 @@ export interface RegenerateChatResponse {
   activeWorldBookIds: string[];
 }
 
+export interface ChatStreamDeltaEvent {
+  type: 'delta';
+  content: string;
+}
+
+export interface ChatStreamDoneEvent {
+  type: 'done';
+  reply: string;
+  conversation: ConversationDto;
+  userMessage?: ChatMessageDto;
+  assistantMessage: ChatMessageDto;
+  messages: ChatMessageDto[];
+  activeWorldBookIds: string[];
+}
+
+export interface ChatStreamErrorEvent {
+  type: 'error';
+  error: string;
+}
+
+export type ChatStreamEvent =
+  | ChatStreamDeltaEvent
+  | ChatStreamDoneEvent
+  | ChatStreamErrorEvent;
+
 export interface LlmSettingsRequest {
   baseUrl: string;
   model: string;
