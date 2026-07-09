@@ -10,6 +10,7 @@ import { settingsRoutes } from './routes/settings.js';
 import { worldBookRoutes } from './routes/worldbooks.js';
 import { conversationRoutes } from './routes/conversations.js';
 import { promptPresetRoutes } from './routes/promptPresets.js';
+import { userPersonaRoutes } from './routes/userPersonas.js';
 
 export interface CreateServerOptions {
   logger?: boolean;
@@ -96,6 +97,7 @@ export async function createServer(
   await app.register(characterRoutes);
   await app.register(settingsRoutes);
   await app.register(promptPresetRoutes);
+  await app.register(userPersonaRoutes);
   await app.register(worldBookRoutes);
   await app.register(conversationRoutes);
   await app.register(chatRoutes);

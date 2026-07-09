@@ -8,7 +8,7 @@ import type {
   PromptSettingsDto,
   RegenerateChatResponse,
 } from '@roleagent/shared';
-import type { Character, Conversation, WorldBook } from '@prisma/client';
+import type { Character, Conversation, UserPersona, WorldBook } from '@prisma/client';
 import { prisma } from '../db/prisma.js';
 import {
   getActiveGenerationSettings,
@@ -83,6 +83,7 @@ async function loadPromptContext(
   conversation: Conversation;
   activeWorldBookIds: string[];
   worldBooks: WorldBook[];
+  userPersona: UserPersona | null;
 }> {
   const readyConversation = await ensureConversationReady(conversation, character);
   const activeWorldBookIds = parseWorldBookIds(readyConversation.activeWorldBookIdsJson);
@@ -90,11 +91,20 @@ async function loadPromptContext(
     where: { id: { in: activeWorldBookIds } },
     orderBy: { updatedAt: 'desc' },
   });
+  const userPersona = readyConversation.userPersonaId
+    ? await prisma.userPersona.findFirst({
+        where: {
+          id: readyConversation.userPersonaId,
+          enabled: true,
+        },
+      })
+    : null;
 
   return {
     conversation: readyConversation,
     activeWorldBookIds,
     worldBooks,
+    userPersona,
   };
 }
 
@@ -558,6 +568,7 @@ export async function chatRoutes(app: FastifyInstance) {
       conversation,
       activeWorldBookIds,
       worldBooks,
+      userPersona,
     } = await loadPromptContext(found, createdConversation);
     const savedMessages = await getConversationMessages(conversation.id);
     const promptSettings = await getActivePromptSettings();
@@ -572,6 +583,7 @@ export async function chatRoutes(app: FastifyInstance) {
       promptSettings,
       promptPresetEntries,
       generationSettings,
+      activeUserPersona: userPersona,
       limits: promptLimitsFromGenerationSettings(promptSettings, generationSettings),
     });
     const messages = prompt.messages;
@@ -607,7 +619,7 @@ export async function chatRoutes(app: FastifyInstance) {
 
     const body: ChatResponse = {
       reply: result.content,
-      conversation: toConversationDto(conversation),
+      conversation: toConversationDto(conversation, userPersona),
       userMessage: toChatMessageDto(userMessage),
       assistantMessage: toChatMessageDto(assistantMessage),
       messages: latestMessages.map(toChatMessageDto),
@@ -656,6 +668,7 @@ export async function chatRoutes(app: FastifyInstance) {
       conversation,
       activeWorldBookIds,
       worldBooks,
+      userPersona,
     } = await loadPromptContext(found, createdConversation);
     const savedMessages = await getConversationMessages(conversation.id);
     const promptSettings = await getActivePromptSettings();
@@ -670,6 +683,7 @@ export async function chatRoutes(app: FastifyInstance) {
       promptSettings,
       promptPresetEntries,
       generationSettings,
+      activeUserPersona: userPersona,
       limits: promptLimitsFromGenerationSettings(promptSettings, generationSettings),
     });
     if (process.env.ROLEAGENT_PROMPT_DEBUG === '1') {
@@ -721,7 +735,7 @@ export async function chatRoutes(app: FastifyInstance) {
       writeNdjsonEvent(reply, {
         type: 'done',
         reply: result.content,
-        conversation: toConversationDto(conversation),
+        conversation: toConversationDto(conversation, userPersona),
         userMessage: toChatMessageDto(userMessage),
         assistantMessage: toChatMessageDto(assistantMessage),
         messages: latestMessages.map(toChatMessageDto),
@@ -756,7 +770,7 @@ export async function chatRoutes(app: FastifyInstance) {
           writeNdjsonEvent(reply, {
             type: 'done',
             reply: err.content,
-            conversation: toConversationDto(conversation),
+            conversation: toConversationDto(conversation, userPersona),
             userMessage: toChatMessageDto(userMessage),
             assistantMessage: toChatMessageDto(assistantMessage),
             messages: latestMessages.map(toChatMessageDto),
@@ -799,6 +813,7 @@ export async function chatRoutes(app: FastifyInstance) {
       conversation,
       activeWorldBookIds,
       worldBooks,
+      userPersona,
     } = await loadPromptContext(existing.character, existing);
     const savedMessages = await getConversationMessages(conversation.id);
     const lastMessage = savedMessages.at(-1);
@@ -827,6 +842,7 @@ export async function chatRoutes(app: FastifyInstance) {
       promptSettings,
       promptPresetEntries,
       generationSettings,
+      activeUserPersona: userPersona,
       limits: promptLimitsFromGenerationSettings(promptSettings, generationSettings),
     });
     if (process.env.ROLEAGENT_PROMPT_DEBUG === '1') {
@@ -859,7 +875,7 @@ export async function chatRoutes(app: FastifyInstance) {
 
     const body: RegenerateChatResponse = {
       reply: result.content,
-      conversation: toConversationDto(conversation),
+      conversation: toConversationDto(conversation, userPersona),
       assistantMessage: toChatMessageDto(assistantMessage),
       messages: latestMessages.map(toChatMessageDto),
       activeWorldBookIds,
@@ -889,6 +905,7 @@ export async function chatRoutes(app: FastifyInstance) {
       conversation,
       activeWorldBookIds,
       worldBooks,
+      userPersona,
     } = await loadPromptContext(existing.character, existing);
     const savedMessages = await getConversationMessages(conversation.id);
     const lastMessage = savedMessages.at(-1);
@@ -917,6 +934,7 @@ export async function chatRoutes(app: FastifyInstance) {
       promptSettings,
       promptPresetEntries,
       generationSettings,
+      activeUserPersona: userPersona,
       limits: promptLimitsFromGenerationSettings(promptSettings, generationSettings),
     });
     if (process.env.ROLEAGENT_PROMPT_DEBUG === '1') {
@@ -961,7 +979,7 @@ export async function chatRoutes(app: FastifyInstance) {
       writeNdjsonEvent(reply, {
         type: 'done',
         reply: result.content,
-        conversation: toConversationDto(conversation),
+        conversation: toConversationDto(conversation, userPersona),
         assistantMessage: toChatMessageDto(assistantMessage),
         messages: latestMessages.map(toChatMessageDto),
         activeWorldBookIds,
@@ -988,7 +1006,7 @@ export async function chatRoutes(app: FastifyInstance) {
           writeNdjsonEvent(reply, {
             type: 'done',
             reply: err.content,
-            conversation: toConversationDto(conversation),
+            conversation: toConversationDto(conversation, userPersona),
             assistantMessage: toChatMessageDto(assistantMessage),
             messages: latestMessages.map(toChatMessageDto),
             activeWorldBookIds,

@@ -31,6 +31,8 @@
   WorldBookDto,
   WorldBooksResponse,
   ImportWorldBookRequest,
+  CreateWorldBookRequest,
+  UpdateWorldBookRequest,
   DeleteWorldBookResponse,
   CharacterWorldBooksResponse,
   UpdateCharacterWorldBooksRequest,
@@ -38,6 +40,12 @@
   UpdateChatMessageRequest,
   UpdateConversationWorldBooksRequest,
   SelectMessageVariantResponse,
+  UserPersonaDto,
+  UserPersonasResponse,
+  CreateUserPersonaRequest,
+  UpdateUserPersonaRequest,
+  DeleteUserPersonaResponse,
+  UpdateConversationUserPersonaRequest,
 } from '@roleagent/shared';
 
 async function throwApiError(res: Response): Promise<never> {
@@ -404,6 +412,35 @@ export async function importWorldBook(
   return (await res.json()) as WorldBookDto;
 }
 
+export async function createWorldBook(
+  body: CreateWorldBookRequest,
+): Promise<WorldBookDto> {
+  const res = await fetch('/api/worldbooks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as WorldBookDto;
+}
+
+export async function updateWorldBook(
+  id: string,
+  body: UpdateWorldBookRequest,
+): Promise<WorldBookDto> {
+  const res = await fetch(`/api/worldbooks/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as WorldBookDto;
+}
+
 export async function exportWorldBook(id: string): Promise<unknown> {
   const res = await fetch(`/api/worldbooks/${encodeURIComponent(id)}/export`);
   if (!res.ok) {
@@ -468,6 +505,74 @@ export async function updateConversationWorldBooks(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as CharacterConversationResponse;
+}
+
+export async function fetchUserPersonas(): Promise<UserPersonaDto[]> {
+  const res = await fetch('/api/user-personas');
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  const data = (await res.json()) as UserPersonasResponse;
+  return data.personas;
+}
+
+export async function createUserPersona(
+  body: CreateUserPersonaRequest,
+): Promise<UserPersonaDto> {
+  const res = await fetch('/api/user-personas', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as UserPersonaDto;
+}
+
+export async function updateUserPersona(
+  id: string,
+  body: UpdateUserPersonaRequest,
+): Promise<UserPersonaDto> {
+  const res = await fetch(`/api/user-personas/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as UserPersonaDto;
+}
+
+export async function deleteUserPersona(
+  id: string,
+): Promise<DeleteUserPersonaResponse> {
+  const res = await fetch(`/api/user-personas/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as DeleteUserPersonaResponse;
+}
+
+export async function updateConversationUserPersona(
+  conversationId: string,
+  body: UpdateConversationUserPersonaRequest,
+): Promise<CharacterConversationResponse> {
+  const res = await fetch(
+    `/api/conversations/${encodeURIComponent(conversationId)}/user-persona`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  );
   if (!res.ok) {
     return throwApiError(res);
   }

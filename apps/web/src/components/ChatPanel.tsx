@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import type { CharacterDto, ChatMessageDto, PromptAssemblyDebugDto } from '@roleagent/shared';
+import type { CharacterDto, ChatMessageDto, PromptAssemblyDebugDto, UserPersonaDto } from '@roleagent/shared';
 import {
   clearConversationMessages,
   deleteChatMessage,
@@ -10,6 +10,7 @@ import {
   streamChat,
   streamRegenerate,
   updateChatMessage,
+  updateConversationUserPersona,
 } from '../api';
 import { splitAssistantMessageParts } from '../utils/assistantMessageParts';
 
@@ -155,6 +156,7 @@ interface ChatPanelProps {
   activeWorldBookCount: number;
   onConversationReady: (conversationId: string, activeWorldBookIds: string[]) => void;
   streamEnabled: boolean;
+  userPersonas: UserPersonaDto[];
 }
 
 export function ChatPanel({
@@ -165,6 +167,7 @@ export function ChatPanel({
   activeWorldBookCount,
   onConversationReady,
   streamEnabled,
+  userPersonas,
 }: ChatPanelProps) {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -179,6 +182,8 @@ export function ChatPanel({
   const [editContent, setEditContent] = useState('');
   const [error, setError] = useState<string | null>(null);
   const streamAbortControllerRef = useRef<AbortController | null>(null);
+  const [boundUserPersonaId, setBoundUserPersonaId] = useState<string | null>(null);
+  const [personaUpdating, setPersonaUpdating] = useState(false);
 
   const actionBusy =
     sending || clearing || regenerating || streamingMode !== null || mutatingMessageId !== null;
@@ -186,6 +191,10 @@ export function ChatPanel({
   const lastAssistantMessageId =
     lastMessage?.role === 'assistant' ? lastMessage.id : null;
   const promptDebug = promptDebugFromMessages(messages);
+  const personaSelectValue =
+    boundUserPersonaId !== null && userPersonas.some((persona) => persona.id === boundUserPersonaId)
+      ? boundUserPersonaId
+      : '';
 
   const isAbortError = (err: unknown): boolean =>
     err instanceof Error && err.name === 'AbortError';
@@ -195,6 +204,7 @@ export function ChatPanel({
     setLoading(true);
     setError(null);
     setConversationId(null);
+    setBoundUserPersonaId(null);
     setEditingMessageId(null);
     setEditContent('');
     getCharacterConversation(character.id)
@@ -203,6 +213,7 @@ export function ChatPanel({
         onConversationReady(res.conversation.id, res.activeWorldBookIds);
         setConversationId(res.conversation.id);
         setMessages(res.messages);
+        setBoundUserPersonaId(res.conversation.userPersonaId);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -476,6 +487,22 @@ export function ChatPanel({
     streamAbortControllerRef.current?.abort();
   };
 
+  const handlePersonaChange = async (nextPersonaId: string) => {
+    if (!conversationId || personaUpdating) return;
+    if (nextPersonaId === (boundUserPersonaId ?? '')) return;
+    const userPersonaId = nextPersonaId === '' ? null : nextPersonaId;
+    setError(null);
+    setPersonaUpdating(true);
+    try {
+      const res = await updateConversationUserPersona(conversationId, { userPersonaId });
+      setBoundUserPersonaId(res.conversation.userPersonaId);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPersonaUpdating(false);
+    }
+  };
+
   return (
     <section className="workspace-panel chat-panel chat-main">
       <header className="chat-header">
@@ -487,6 +514,21 @@ export function ChatPanel({
           </p>
         </div>
         <div className="chat-header-actions">
+          <label className="chat-persona-picker">
+            <span>Persona</span>
+            <select
+              value={personaSelectValue}
+              onChange={(event) => void handlePersonaChange(event.target.value)}
+              disabled={loading || personaUpdating || !conversationId}
+            >
+              <option value="">无</option>
+              {userPersonas.map((persona) => (
+                <option key={persona.id} value={persona.id}>
+                  {persona.name}
+                </option>
+              ))}
+            </select>
+          </label>
           <span className="count-pill">世界书 {activeWorldBookCount}</span>
           <span className="count-pill">{messages.length}</span>
           <button

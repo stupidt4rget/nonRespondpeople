@@ -57,13 +57,30 @@ model Conversation {
   characterId           String
   title                 String?
   activeWorldBookIdsJson String?
+  userPersonaId         String?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
-  character Character     @relation(fields: [characterId], references: [id], onDelete: Cascade)
-  messages  ChatMessage[]
+  character   Character      @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  userPersona UserPersona?   @relation(fields: [userPersonaId], references: [id], onDelete: SetNull)
+  messages    ChatMessage[]
 
   @@index([characterId])
+  @@index([userPersonaId])
+}
+
+model UserPersona {
+  id          String   @id @default(cuid())
+  name        String
+  description String
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  conversations Conversation[]
+
+  @@index([enabled])
+  @@index([updatedAt])
 }
 
 model ChatMessage {

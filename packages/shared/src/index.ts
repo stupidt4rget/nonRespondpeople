@@ -201,6 +201,7 @@ export interface AssistantMessageVariantDto {
 
 export interface PromptAssemblyDebugDto {
   characterSections: PromptAssemblySectionDto[];
+  userPersona: PromptAssemblySectionDto | null;
   promptPresetEntries: PromptAssemblySectionDto[];
   worldBookMatches: PromptAssemblyWorldBookMatchDto[];
   recentHistory: PromptAssemblySectionDto[];
@@ -226,7 +227,13 @@ export interface PromptAssemblyWorldBookMatchDto {
   entryName: string | null;
   keywords: string[];
   matchedKeywords: string[];
+  triggerStrategy: WorldBookTriggerStrategy;
+  triggerReason: string;
   insertionPosition: string;
+  order: number;
+  depth: number;
+  probability: number;
+  isInjected: boolean;
   chars: number;
   estimatedTokens: number;
   preview: string;
@@ -391,6 +398,7 @@ export interface WorldBookDto {
   name: string;
   description: string | null;
   entriesJson: string;
+  entries: WorldBookEntryDto[];
   rawJson: string | null;
   createdAt: string;
   updatedAt: string;
@@ -404,6 +412,41 @@ export interface ImportWorldBookRequest {
   name?: string;
   description?: string;
   rawJson: unknown;
+}
+
+export type WorldBookInsertionPosition =
+  | 'beforeCharacter'
+  | 'afterCharacter'
+  | 'beforeRecentMessages'
+  | 'afterRecentMessages';
+
+export type WorldBookTriggerStrategy = 'constant' | 'keyword' | 'selective';
+
+export interface WorldBookEntryDto {
+  id: string;
+  enabled: boolean;
+  title: string;
+  comment: string | null;
+  content: string;
+  primaryKeys: string[];
+  secondaryKeys: string[];
+  triggerStrategy: WorldBookTriggerStrategy;
+  insertionPosition: WorldBookInsertionPosition;
+  order: number;
+  depth: number | null;
+  probability: number;
+}
+
+export interface CreateWorldBookRequest {
+  name: string;
+  description?: string | null;
+  entries?: Partial<WorldBookEntryDto>[];
+}
+
+export interface UpdateWorldBookRequest {
+  name?: string;
+  description?: string | null;
+  entries?: Partial<WorldBookEntryDto>[];
 }
 
 export interface DeleteWorldBookResponse {
@@ -426,6 +469,8 @@ export interface ConversationDto {
   characterId: string;
   title: string | null;
   activeWorldBookIds: string[];
+  userPersonaId: string | null;
+  userPersona: UserPersonaSummaryDto | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -453,6 +498,44 @@ export interface CharacterConversationResponse {
 
 export interface UpdateConversationWorldBooksRequest {
   worldBookIds: string[];
+}
+
+export interface UserPersonaSummaryDto {
+  id: string;
+  name: string;
+  enabled: boolean;
+}
+
+export interface UserPersonaDto extends UserPersonaSummaryDto {
+  description: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UserPersonasResponse {
+  personas: UserPersonaDto[];
+}
+
+export interface CreateUserPersonaRequest {
+  name: string;
+  description: string;
+  enabled?: boolean;
+}
+
+export interface UpdateUserPersonaRequest {
+  name?: string;
+  description?: string;
+  enabled?: boolean;
+}
+
+export interface DeleteUserPersonaResponse {
+  ok: true;
+  id: string;
+  clearedConversationCount: number;
+}
+
+export interface UpdateConversationUserPersonaRequest {
+  userPersonaId?: string | null;
 }
 
 export interface UpdateChatMessageRequest {

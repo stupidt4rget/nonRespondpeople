@@ -1,5 +1,10 @@
 import type { FastifyInstance } from 'fastify';
-import type { AssistantMessageVariant, ChatMessage, Conversation } from '@prisma/client';
+import type {
+  AssistantMessageVariant,
+  ChatMessage,
+  Conversation,
+  UserPersona,
+} from '@prisma/client';
 import type {
   AssistantMessageVariantDto,
   CharacterConversationResponse,
@@ -10,11 +15,13 @@ import type {
   PromptAssemblyDebugDto,
   SelectMessageVariantResponse,
   UpdateChatMessageRequest,
+  UpdateConversationUserPersonaRequest,
   UpdateConversationWorldBooksRequest,
 } from '@roleagent/shared';
 import { prisma } from '../db/prisma.js';
 import { getDefaultWorldBookIds } from './worldbooks.js';
 import { substituteMacros, type PromptCharacter } from '../services/promptBuilder.js';
+import { parseWorldBookEntriesJson } from '../services/worldBookEntries.js';
 
 interface ConversationCharacter extends PromptCharacter {
   id: string;
@@ -47,12 +54,23 @@ function stringifyWorldBookIds(ids: string[]): string {
   return JSON.stringify([...new Set(ids)]);
 }
 
-export function toConversationDto(conversation: Conversation): ConversationDto {
+export function toConversationDto(
+  conversation: Conversation,
+  userPersona?: UserPersona | null,
+): ConversationDto {
   return {
     id: conversation.id,
     characterId: conversation.characterId,
     title: conversation.title,
     activeWorldBookIds: parseWorldBookIds(conversation.activeWorldBookIdsJson),
+    userPersonaId: conversation.userPersonaId,
+    userPersona: userPersona
+      ? {
+          id: userPersona.id,
+          name: userPersona.name,
+          enabled: userPersona.enabled,
+        }
+      : null,
     createdAt: conversation.createdAt.toISOString(),
     updatedAt: conversation.updatedAt.toISOString(),
   };
@@ -190,19 +208,23 @@ export async function buildConversationResponse(
 ): Promise<CharacterConversationResponse> {
   const messages = await getConversationMessages(conversation.id);
   const activeWorldBookIds = parseWorldBookIds(conversation.activeWorldBookIdsJson);
+  const userPersona = conversation.userPersonaId
+    ? await prisma.userPersona.findUnique({ where: { id: conversation.userPersonaId } })
+    : null;
   const worldBooks = await prisma.worldBook.findMany({
     where: { id: { in: activeWorldBookIds } },
     orderBy: { updatedAt: 'desc' },
   });
 
   return {
-    conversation: toConversationDto(conversation),
+    conversation: toConversationDto(conversation, userPersona),
     messages: messages.map(toChatMessageDto),
     worldBooks: worldBooks.map((worldBook) => ({
       id: worldBook.id,
       name: worldBook.name,
       description: worldBook.description,
       entriesJson: worldBook.entriesJson,
+      entries: parseWorldBookEntriesJson(worldBook.entriesJson),
       rawJson: worldBook.rawJson,
       createdAt: worldBook.createdAt.toISOString(),
       updatedAt: worldBook.updatedAt.toISOString(),
@@ -341,6 +363,37 @@ export async function conversationRoutes(app: FastifyInstance) {
       conversation.character,
     );
     return buildConversationResponse(readyConversation);
+  });
+
+  app.patch('/api/conversations/:id/user-persona', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!isPlainObject(req.body)) {
+      return reply.code(400).send({ error: 'request body must be an object' });
+    }
+    const body = req.body as UpdateConversationUserPersonaRequest;
+    const existing = await prisma.conversation.findUnique({ where: { id } });
+    if (!existing) {
+      return reply.code(404).send({ error: 'conversation not found' });
+    }
+
+    const userPersonaId =
+      typeof body.userPersonaId === 'string' && body.userPersonaId.trim() !== ''
+        ? body.userPersonaId.trim()
+        : null;
+    if (userPersonaId !== null) {
+      const persona = await prisma.userPersona.findUnique({
+        where: { id: userPersonaId },
+      });
+      if (!persona) {
+        return reply.code(404).send({ error: 'user persona not found' });
+      }
+    }
+
+    const updated = await prisma.conversation.update({
+      where: { id },
+      data: { userPersonaId },
+    });
+    return buildConversationResponse(updated);
   });
 
   app.patch('/api/conversations/:id/worldbooks', async (req, reply) => {
