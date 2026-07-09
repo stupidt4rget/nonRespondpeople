@@ -148,6 +148,115 @@ export interface PromptSettingsRequest {
   worldBookScanDepth?: number;
 }
 
+export type PromptPresetSourceType =
+  | 'roleagent'
+  | 'st-sysprompt'
+  | 'st-openai-main'
+  | 'st-openai-prompt-list'
+  | 'manual';
+
+export type PromptPresetEntryRole = 'system' | 'user' | 'assistant';
+
+export interface PromptPresetEntryDto {
+  id: string;
+  identifier: string | null;
+  name: string;
+  role: PromptPresetEntryRole;
+  enabled: boolean;
+  content: string;
+  orderIndex: number;
+  marker: boolean;
+  injectionPosition: string | null;
+  injectionDepth: number | null;
+  injectionOrder: number | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface PromptPresetDto {
+  id: string;
+  name: string;
+  sourceType: PromptPresetSourceType;
+  isActive: boolean;
+  entryCount: number;
+  importedAt: string | null;
+  warnings: string[];
+  ignoredFields: string[];
+  originalFileName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  entries?: PromptPresetEntryDto[];
+}
+
+export interface PromptPresetListResponse {
+  presets: PromptPresetDto[];
+}
+
+export interface PromptPresetDetailResponse {
+  preset: PromptPresetDto;
+}
+
+export interface PromptPresetCandidate {
+  name: string;
+  sourceType: PromptPresetSourceType;
+  entries: PromptPresetEntryDto[];
+  warnings: string[];
+  ignoredFields: string[];
+  originalFileName: string | null;
+}
+
+export interface PromptPresetImportPreviewRequest {
+  json: unknown;
+  fileName?: string;
+}
+
+export interface PromptPresetImportPreviewResponse {
+  candidate: PromptPresetCandidate;
+  recognizedAs: PromptPresetSourceType;
+  entriesPreview: PromptPresetEntryDto[];
+  warnings: string[];
+  ignoredFields: string[];
+  willCreateEntryCount: number;
+  willSkipCount: number;
+}
+
+export interface PromptPresetApplyRequest {
+  candidate: PromptPresetCandidate;
+}
+
+export interface PromptPresetApplyResponse {
+  preset: PromptPresetDto;
+  warnings: string[];
+}
+
+export interface PromptPresetCreateRequest {
+  name: string;
+  entries?: Array<Partial<PromptPresetEntryDto>>;
+}
+
+export interface PromptPresetUpdateRequest {
+  name?: string;
+  isActive?: boolean;
+}
+
+export interface PromptPresetEntryUpdateRequest {
+  entries: Array<Partial<PromptPresetEntryDto> & { id?: string }>;
+}
+
+export interface DeletePromptPresetResponse {
+  ok: true;
+  id: string;
+}
+
+export interface PromptPresetExportResponse {
+  format: 'roleagent-structured-prompt-preset';
+  version: 1;
+  name: string;
+  sourceType: PromptPresetSourceType;
+  entries: Array<Omit<PromptPresetEntryDto, 'id' | 'createdAt' | 'updatedAt'>>;
+  exportedAt: string;
+}
+
 export interface ImportCharacterCardRequest {
   name: string;
   description?: string;

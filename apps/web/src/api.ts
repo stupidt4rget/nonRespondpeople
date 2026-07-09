@@ -11,6 +11,18 @@
   ImportCharacterCardRequest,
   LlmSettingsRequest,
   LlmSettingsStatusResponse,
+  DeletePromptPresetResponse,
+  PromptPresetApplyRequest,
+  PromptPresetApplyResponse,
+  PromptPresetCreateRequest,
+  PromptPresetDetailResponse,
+  PromptPresetDto,
+  PromptPresetEntryUpdateRequest,
+  PromptPresetExportResponse,
+  PromptPresetImportPreviewRequest,
+  PromptPresetImportPreviewResponse,
+  PromptPresetListResponse,
+  PromptPresetUpdateRequest,
   PromptSettingsDto,
   PromptSettingsRequest,
   ExportCharacterCardResponse,
@@ -31,6 +43,9 @@ async function throwApiError(res: Response): Promise<never> {
     const err = (await res.json()) as { error?: unknown };
     if (typeof err.error === 'string') {
       message = err.error;
+      if (err.error === 'payload_too_large') {
+        message = 'Preset file is too large. Maximum supported size is 10 MB.';
+      }
     }
   } catch {
     // Ignore non-JSON error responses and fall back to HTTP status.
@@ -174,6 +189,136 @@ export async function resetPromptSettings(): Promise<PromptSettingsDto> {
     return throwApiError(res);
   }
   return (await res.json()) as PromptSettingsDto;
+}
+
+export async function previewPromptPresetImport(
+  body: PromptPresetImportPreviewRequest,
+): Promise<PromptPresetImportPreviewResponse> {
+  const res = await fetch('/api/prompt-presets/import/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as PromptPresetImportPreviewResponse;
+}
+
+export async function applyPromptPresetImport(
+  body: PromptPresetApplyRequest,
+): Promise<PromptPresetApplyResponse> {
+  const res = await fetch('/api/prompt-presets/import/apply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as PromptPresetApplyResponse;
+}
+
+export async function fetchPromptPresets(): Promise<PromptPresetDto[]> {
+  const res = await fetch('/api/prompt-presets');
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  const data = (await res.json()) as PromptPresetListResponse;
+  return data.presets;
+}
+
+export async function fetchPromptPreset(id: string): Promise<PromptPresetDto> {
+  const res = await fetch(`/api/prompt-presets/${encodeURIComponent(id)}`);
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  const data = (await res.json()) as PromptPresetDetailResponse;
+  return data.preset;
+}
+
+export async function createPromptPreset(
+  body: PromptPresetCreateRequest,
+): Promise<PromptPresetDto> {
+  const res = await fetch('/api/prompt-presets', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as PromptPresetDto;
+}
+
+export async function updatePromptPreset(
+  id: string,
+  body: PromptPresetUpdateRequest,
+): Promise<PromptPresetDto> {
+  const res = await fetch(`/api/prompt-presets/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as PromptPresetDto;
+}
+
+export async function activatePromptPreset(id: string): Promise<PromptPresetDto> {
+  const res = await fetch(`/api/prompt-presets/${encodeURIComponent(id)}/activate`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as PromptPresetDto;
+}
+
+export async function updatePromptPresetEntries(
+  id: string,
+  body: PromptPresetEntryUpdateRequest,
+): Promise<PromptPresetDto> {
+  const res = await fetch(`/api/prompt-presets/${encodeURIComponent(id)}/entries`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as PromptPresetDto;
+}
+
+export async function deletePromptPreset(
+  id: string,
+): Promise<DeletePromptPresetResponse> {
+  const res = await fetch(`/api/prompt-presets/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as DeletePromptPresetResponse;
+}
+
+export async function duplicatePromptPreset(id: string): Promise<PromptPresetDto> {
+  const res = await fetch(`/api/prompt-presets/${encodeURIComponent(id)}/duplicate`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as PromptPresetDto;
+}
+
+export async function exportPromptPreset(id: string): Promise<PromptPresetExportResponse> {
+  const res = await fetch(`/api/prompt-presets/${encodeURIComponent(id)}/export`);
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as PromptPresetExportResponse;
 }
 
 export async function exportCharacterCard(
