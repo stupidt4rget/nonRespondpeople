@@ -71,11 +71,32 @@ model ChatMessage {
   conversationId String
   role           String
   content        String
+  thinkingContent String?
+  rawContent      String?
+  timingJson      String?
+  promptDebugJson String?
+  selectedVariantId String?
   createdAt      DateTime @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  variants     AssistantMessageVariant[]
 
   @@index([conversationId, createdAt])
+}
+
+model AssistantMessageVariant {
+  id                     String   @id @default(cuid())
+  messageId              String
+  content                String
+  thinkingContent        String?
+  rawContent             String?
+  timingJson             String?
+  generationSettingsJson String?
+  createdAt              DateTime @default(now())
+
+  message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId, createdAt])
 }
 
 model PromptSettings {
@@ -99,12 +120,22 @@ model GenerationSettings {
   maxReplyTokens       Int      @default(65536)
   responseCount        Int      @default(1)
   streamEnabled        Boolean  @default(true)
+  visibleThinkingEnabled Boolean @default(true)
   temperature          Float    @default(1)
   frequencyPenalty     Float    @default(0)
   presencePenalty      Float    @default(0)
   topP                 Float    @default(1)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
+}
+
+model LlmSettings {
+  id        String   @id
+  baseUrl   String
+  model     String
+  apiKey    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model PromptPreset {

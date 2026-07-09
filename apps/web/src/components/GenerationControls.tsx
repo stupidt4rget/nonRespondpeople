@@ -23,6 +23,7 @@ export function GenerationControls({
   const [contextLimitTokens, setContextLimitTokens] = useState('200000');
   const [maxReplyTokens, setMaxReplyTokens] = useState('65536');
   const [streamEnabled, setStreamEnabled] = useState(true);
+  const [visibleThinkingEnabled, setVisibleThinkingEnabled] = useState(true);
   const [temperature, setTemperature] = useState('1');
   const [frequencyPenalty, setFrequencyPenalty] = useState('0');
   const [presencePenalty, setPresencePenalty] = useState('0');
@@ -39,6 +40,7 @@ export function GenerationControls({
     setContextLimitTokens(String(next.contextLimitTokens));
     setMaxReplyTokens(String(next.maxReplyTokens));
     setStreamEnabled(next.streamEnabled);
+    setVisibleThinkingEnabled(next.visibleThinkingEnabled);
     setTemperature(String(next.temperature));
     setFrequencyPenalty(String(next.frequencyPenalty));
     setPresencePenalty(String(next.presencePenalty));
@@ -61,6 +63,7 @@ export function GenerationControls({
         maxReplyTokens: toNumber(maxReplyTokens, 65536),
         responseCount: 1,
         streamEnabled,
+        visibleThinkingEnabled,
         temperature: toNumber(temperature, 1),
         frequencyPenalty: toNumber(frequencyPenalty, 0),
         presencePenalty: toNumber(presencePenalty, 0),
@@ -104,6 +107,20 @@ export function GenerationControls({
           />
           <span>流式传输</span>
         </label>
+
+        <label className="field field--checkbox">
+          <input
+            type="checkbox"
+            checked={visibleThinkingEnabled}
+            onChange={(event) => setVisibleThinkingEnabled(event.target.checked)}
+            disabled={loading || saving}
+          />
+          <span>请求可见思考内容</span>
+        </label>
+
+        <p className="generation-controls-hint">
+          开启后会请求模型用 &lt;thinking&gt;...&lt;/thinking&gt; 输出可见思考内容；不同模型可能忽略或拒绝。
+        </p>
 
         <label className="field field--checkbox">
           <input

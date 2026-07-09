@@ -94,11 +94,6 @@ export function LlmSettings() {
       setError('模型不能为空');
       return;
     }
-    if (!apiKey.trim()) {
-      setError('API Key 不能为空');
-      return;
-    }
-
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -106,7 +101,7 @@ export function LlmSettings() {
       const res = await saveLlmSettings({
         baseUrl: baseUrl.trim(),
         model: model.trim(),
-        apiKey: apiKey.trim(),
+        ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
       });
       writeStoredSettings({
         baseUrl: baseUrl.trim(),
@@ -116,8 +111,8 @@ export function LlmSettings() {
       setStatus(res);
       setBaseUrl(res.baseUrl ?? baseUrl.trim());
       setModel(res.model ?? model.trim());
-      setApiKey(apiKey.trim());
-      setSuccess('模型设置已保存到当前后端进程；本机仅保存 Base URL 和模型草稿。');
+      setApiKey('');
+      setSuccess('模型设置已保存。API Key 会保存在后端数据库中，前端不会保存密钥。');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -131,6 +126,30 @@ export function LlmSettings() {
     setApiKey('');
     setSuccess('已清除本机保存的 Base URL 和模型草稿。当前后端进程中的配置不会被清除。');
     setError(null);
+  };
+
+  const handleClearApiKey = async () => {
+    if (!baseUrl.trim() || !model.trim()) {
+      setError('请先填写 API Base URL 和模型。');
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await saveLlmSettings({
+        baseUrl: baseUrl.trim(),
+        model: model.trim(),
+        clearApiKey: true,
+      });
+      setStatus(res);
+      setApiKey('');
+      setSuccess('已清除后端保存的 API Key。');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -151,11 +170,11 @@ export function LlmSettings() {
 
       {status?.configured && (
         <p className="secret-hint">
-          API Key：{status.hasApiKey ? '已配置' : '未配置'}
+          API Key：{status.hasApiKey ? '已保存' : '未设置'}
         </p>
       )}
       <p className="secret-hint">
-        API Key 只发送到当前后端进程；前端本机只保存 Base URL 和模型草稿。
+        API Key 只会发送到后端保存；前端本地只保存 Base URL 和模型草稿，不保存密钥。
       </p>
 
       <form className="stacked-form" onSubmit={handleSave}>
@@ -186,12 +205,20 @@ export function LlmSettings() {
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             disabled={loading || saving}
-            placeholder="你的 API Key"
+            placeholder={status?.hasApiKey ? '已保存 API Key，留空将保留原值' : '未设置 API Key'}
             autoComplete="off"
           />
         </label>
         <button className="button button--primary" type="submit" disabled={loading || saving}>
           {saving ? '保存中...' : '保存设置'}
+        </button>
+        <button
+          className="button button--danger"
+          type="button"
+          onClick={() => void handleClearApiKey()}
+          disabled={loading || saving || !status?.hasApiKey}
+        >
+          清除 API Key
         </button>
         <button
           className="button button--secondary"

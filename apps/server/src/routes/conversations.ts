@@ -1,9 +1,14 @@
 import type { FastifyInstance } from 'fastify';
-import type { ChatMessage, Conversation } from '@prisma/client';
+import type { AssistantMessageVariant, ChatMessage, Conversation } from '@prisma/client';
 import type {
+  AssistantMessageVariantDto,
   CharacterConversationResponse,
   ChatMessageDto,
   ConversationDto,
+  GenerationSettingsDto,
+  GenerationTimingDto,
+  PromptAssemblyDebugDto,
+  SelectMessageVariantResponse,
   UpdateChatMessageRequest,
   UpdateConversationWorldBooksRequest,
 } from '@roleagent/shared';
@@ -14,6 +19,10 @@ import { substituteMacros, type PromptCharacter } from '../services/promptBuilde
 interface ConversationCharacter extends PromptCharacter {
   id: string;
 }
+
+export type ChatMessageWithVariants = ChatMessage & {
+  variants?: AssistantMessageVariant[];
+};
 
 function isPlainObject(value: unknown): value is object {
   return (
@@ -49,12 +58,45 @@ export function toConversationDto(conversation: Conversation): ConversationDto {
   };
 }
 
-export function toChatMessageDto(message: ChatMessage): ChatMessageDto {
+function parseJsonField<T>(value: string | null): T | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+
+function toVariantDto(variant: AssistantMessageVariant): AssistantMessageVariantDto {
+  return {
+    id: variant.id,
+    messageId: variant.messageId,
+    content: variant.content,
+    thinkingContent: variant.thinkingContent,
+    rawContent: variant.rawContent,
+    timing: parseJsonField<GenerationTimingDto>(variant.timingJson),
+    generationSettingsSnapshot: parseJsonField<GenerationSettingsDto>(
+      variant.generationSettingsJson,
+    ),
+    createdAt: variant.createdAt.toISOString(),
+  };
+}
+
+export function toChatMessageDto(message: ChatMessageWithVariants): ChatMessageDto {
   return {
     id: message.id,
     conversationId: message.conversationId,
     role: message.role === 'user' ? 'user' : 'assistant',
     content: message.content,
+    thinkingContent: message.thinkingContent,
+    rawContent: message.rawContent,
+    timing: parseJsonField<GenerationTimingDto>(message.timingJson),
+    promptDebug: parseJsonField<PromptAssemblyDebugDto>(message.promptDebugJson),
+    selectedVariantId: message.selectedVariantId,
+    variants:
+      message.variants && message.variants.length > 0
+        ? message.variants.map(toVariantDto)
+        : undefined,
     createdAt: message.createdAt.toISOString(),
   };
 }
@@ -120,10 +162,15 @@ export async function getOrCreateCharacterConversation(
 
 export async function getConversationMessages(
   conversationId: string,
-): Promise<ChatMessage[]> {
+): Promise<ChatMessageWithVariants[]> {
   return prisma.chatMessage.findMany({
     where: { conversationId },
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    include: {
+      variants: {
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      },
+    },
   });
 }
 
@@ -205,10 +252,56 @@ export async function conversationRoutes(app: FastifyInstance) {
 
     await prisma.chatMessage.update({
       where: { id: message.id },
-      data: { content: content.trim() },
+      data: {
+        content: content.trim(),
+        rawContent: content.trim(),
+        thinkingContent: null,
+      },
     });
     return buildConversationResponse(conversation);
   });
+
+  app.patch(
+    '/api/conversations/:conversationId/messages/:messageId/variants/:variantId/select',
+    async (req, reply) => {
+      const { conversationId, messageId, variantId } = req.params as {
+        conversationId: string;
+        messageId: string;
+        variantId: string;
+      };
+      const conversation = await prisma.conversation.findUnique({
+        where: { id: conversationId },
+      });
+      if (!conversation) {
+        return reply.code(404).send({ error: 'conversation not found' });
+      }
+      const message = await prisma.chatMessage.findFirst({
+        where: { id: messageId, conversationId, role: 'assistant' },
+      });
+      if (!message) {
+        return reply.code(404).send({ error: 'assistant message not found' });
+      }
+      const variant = await prisma.assistantMessageVariant.findFirst({
+        where: { id: variantId, messageId },
+      });
+      if (!variant) {
+        return reply.code(404).send({ error: 'message variant not found' });
+      }
+
+      await prisma.chatMessage.update({
+        where: { id: message.id },
+        data: {
+          content: variant.content,
+          rawContent: variant.rawContent,
+          thinkingContent: variant.thinkingContent,
+          timingJson: variant.timingJson,
+          selectedVariantId: variant.id,
+        },
+      });
+      const response = await buildConversationResponse(conversation);
+      return response satisfies SelectMessageVariantResponse;
+    },
+  );
 
   app.delete('/api/conversations/:conversationId/messages/:messageId', async (req, reply) => {
     const { conversationId, messageId } = req.params as {

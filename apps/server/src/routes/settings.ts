@@ -17,6 +17,7 @@ interface ActiveLlmSettings {
 
 const PROMPT_SETTINGS_ID = 'default';
 const GENERATION_SETTINGS_ID = 'default';
+const LLM_SETTINGS_ID = 'default';
 const DEFAULT_ROLEPLAY_PRESET = [
   'Stay in character as {{char}}.',
   'Maintain continuity with the character card, worldbook, and conversation.',
@@ -41,13 +42,12 @@ const DEFAULT_GENERATION_SETTINGS: GenerationSettingsDto = {
   maxReplyTokens: 65536,
   responseCount: 1,
   streamEnabled: true,
+  visibleThinkingEnabled: true,
   temperature: 1,
   frequencyPenalty: 0,
   presencePenalty: 0,
   topP: 1,
 };
-
-let memoryLlmSettings: ActiveLlmSettings | null = null;
 
 function isPlainObject(value: unknown): value is object {
   return (
@@ -69,8 +69,18 @@ function getEnvSettings(): ActiveLlmSettings | null {
   return { baseUrl, apiKey, model };
 }
 
-export function getActiveLlmSettings(): ActiveLlmSettings | null {
-  return memoryLlmSettings ?? getEnvSettings();
+export async function getActiveLlmSettings(): Promise<ActiveLlmSettings | null> {
+  const saved = await prisma.llmSettings.findUnique({
+    where: { id: LLM_SETTINGS_ID },
+  });
+  if (saved?.apiKey) {
+    return {
+      baseUrl: saved.baseUrl,
+      model: saved.model,
+      apiKey: saved.apiKey,
+    };
+  }
+  return getEnvSettings();
 }
 
 export async function getActivePromptSettings(): Promise<PromptSettingsDto> {
@@ -107,6 +117,7 @@ export async function getActiveGenerationSettings(): Promise<GenerationSettingsD
     maxReplyTokens: found.maxReplyTokens,
     responseCount: found.responseCount,
     streamEnabled: found.streamEnabled,
+    visibleThinkingEnabled: found.visibleThinkingEnabled,
     temperature: found.temperature,
     frequencyPenalty: found.frequencyPenalty,
     presencePenalty: found.presencePenalty,
@@ -114,14 +125,17 @@ export async function getActiveGenerationSettings(): Promise<GenerationSettingsD
   };
 }
 
-function getLlmSettingsStatus(): LlmSettingsStatusResponse {
-  if (memoryLlmSettings) {
+async function getLlmSettingsStatus(): Promise<LlmSettingsStatusResponse> {
+  const saved = await prisma.llmSettings.findUnique({
+    where: { id: LLM_SETTINGS_ID },
+  });
+  if (saved) {
     return {
-      configured: true,
-      source: 'memory',
-      baseUrl: memoryLlmSettings.baseUrl,
-      model: memoryLlmSettings.model,
-      hasApiKey: true,
+      configured: saved.apiKey !== null && saved.apiKey.trim() !== '',
+      source: 'database',
+      baseUrl: saved.baseUrl,
+      model: saved.model,
+      hasApiKey: saved.apiKey !== null && saved.apiKey.trim() !== '',
     };
   }
 
@@ -243,6 +257,10 @@ function normalizeGenerationSettingsRequest(
     typeof body.streamEnabled === 'boolean'
       ? body.streamEnabled
       : current.streamEnabled;
+  const visibleThinkingEnabled =
+    typeof body.visibleThinkingEnabled === 'boolean'
+      ? body.visibleThinkingEnabled
+      : current.visibleThinkingEnabled;
   const contextMax = contextUnlockEnabled ? 2000000 : 200000;
   const contextLimitTokens =
     typeof body.contextLimitTokens === 'number'
@@ -265,6 +283,7 @@ function normalizeGenerationSettingsRequest(
     ),
     responseCount: 1,
     streamEnabled,
+    visibleThinkingEnabled,
     temperature: boundedNumber(body.temperature, current.temperature, 0, 2),
     frequencyPenalty: boundedNumber(
       body.frequencyPenalty,
@@ -324,11 +343,45 @@ async function saveGenerationSettings(
     maxReplyTokens: saved.maxReplyTokens,
     responseCount: saved.responseCount,
     streamEnabled: saved.streamEnabled,
+    visibleThinkingEnabled: saved.visibleThinkingEnabled,
     temperature: saved.temperature,
     frequencyPenalty: saved.frequencyPenalty,
     presencePenalty: saved.presencePenalty,
     topP: saved.topP,
   };
+}
+
+async function saveLlmSettings(
+  body: LlmSettingsRequest,
+): Promise<LlmSettingsStatusResponse> {
+  const { baseUrl, model, apiKey, clearApiKey } = body;
+  const existing = await prisma.llmSettings.findUnique({
+    where: { id: LLM_SETTINGS_ID },
+  });
+  const trimmedApiKey = typeof apiKey === 'string' ? apiKey.trim() : '';
+  const nextApiKey =
+    clearApiKey === true
+      ? null
+      : trimmedApiKey !== ''
+        ? trimmedApiKey
+        : existing?.apiKey ?? null;
+
+  await prisma.llmSettings.upsert({
+    where: { id: LLM_SETTINGS_ID },
+    create: {
+      id: LLM_SETTINGS_ID,
+      baseUrl: baseUrl.trim(),
+      model: model.trim(),
+      apiKey: nextApiKey,
+    },
+    update: {
+      baseUrl: baseUrl.trim(),
+      model: model.trim(),
+      apiKey: nextApiKey,
+    },
+  });
+
+  return getLlmSettingsStatus();
 }
 
 export async function settingsRoutes(app: FastifyInstance) {
@@ -389,7 +442,8 @@ export async function settingsRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: 'request body must be an object' });
     }
 
-    const { baseUrl, model, apiKey } = req.body as LlmSettingsRequest;
+    const body = req.body as LlmSettingsRequest;
+    const { baseUrl, model } = body;
     if (typeof baseUrl !== 'string' || baseUrl.trim() === '') {
       return reply
         .code(400)
@@ -400,18 +454,28 @@ export async function settingsRoutes(app: FastifyInstance) {
         .code(400)
         .send({ error: 'model is required and must be a non-empty string' });
     }
-    if (typeof apiKey !== 'string' || apiKey.trim() === '') {
-      return reply
-        .code(400)
-        .send({ error: 'apiKey is required and must be a non-empty string' });
+
+    return saveLlmSettings(body);
+  });
+
+  app.put('/api/settings/llm', async (req, reply) => {
+    if (!isPlainObject(req.body)) {
+      return reply.code(400).send({ error: 'request body must be an object' });
     }
 
-    memoryLlmSettings = {
-      baseUrl: baseUrl.trim(),
-      model: model.trim(),
-      apiKey: apiKey.trim(),
-    };
+    const body = req.body as LlmSettingsRequest;
+    const { baseUrl, model } = body;
+    if (typeof baseUrl !== 'string' || baseUrl.trim() === '') {
+      return reply
+        .code(400)
+        .send({ error: 'baseUrl is required and must be a non-empty string' });
+    }
+    if (typeof model !== 'string' || model.trim() === '') {
+      return reply
+        .code(400)
+        .send({ error: 'model is required and must be a non-empty string' });
+    }
 
-    return getLlmSettingsStatus();
+    return saveLlmSettings(body);
   });
 }

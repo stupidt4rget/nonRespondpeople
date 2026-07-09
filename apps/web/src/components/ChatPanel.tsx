@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import type { CharacterDto, ChatMessageDto } from '@roleagent/shared';
+import type { CharacterDto, ChatMessageDto, PromptAssemblyDebugDto } from '@roleagent/shared';
 import {
   clearConversationMessages,
   deleteChatMessage,
   getCharacterConversation,
   regenerateLastAssistant,
+  selectMessageVariant,
   sendChat,
   streamChat,
   streamRegenerate,
@@ -13,6 +14,138 @@ import {
 import { splitAssistantMessageParts } from '../utils/assistantMessageParts';
 
 type ChatMessage = ChatMessageDto;
+
+function formatSeconds(ms: number | null | undefined): string | null {
+  if (typeof ms !== 'number' || !Number.isFinite(ms)) return null;
+  return `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)}s`;
+}
+
+function formatTiming(message: ChatMessage): string | null {
+  const timing = message.timing;
+  if (!timing) return null;
+  const thinking = formatSeconds(timing.firstTokenMs);
+  const output = formatSeconds(timing.outputMs);
+  const total = formatSeconds(timing.totalMs);
+  const parts = [
+    thinking ? `思考 ${thinking}` : null,
+    output ? `输出 ${output}` : null,
+    total ? `总计 ${total}` : null,
+    timing.stopped ? '已停止' : null,
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+function promptDebugFromMessages(messages: ChatMessage[]): PromptAssemblyDebugDto | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.promptDebug) return message.promptDebug;
+  }
+  return null;
+}
+
+function PromptDebugPanel({ debug }: { debug: PromptAssemblyDebugDto | null }) {
+  if (!debug) {
+    return (
+      <details className="prompt-debug-panel">
+        <summary>Prompt Preview</summary>
+        <p className="prompt-debug-empty">发送一条消息后会显示最近一次 prompt assembly。</p>
+      </details>
+    );
+  }
+
+  return (
+    <details className="prompt-debug-panel">
+      <summary>
+        Prompt Preview · {debug.totalChars} 字符 · 约 {debug.estimatedTokens} tokens
+      </summary>
+      <div className="prompt-debug-grid">
+        <section>
+          <h3>角色卡 Prompt</h3>
+          {debug.characterSections.map((section, index) => (
+            <p key={`${section.name}-${index}`}>
+              <strong>{section.name}</strong> · {section.chars} 字符 · 约{' '}
+              {section.estimatedTokens} tokens<br />
+              {section.preview}
+            </p>
+          ))}
+        </section>
+        <section>
+          <h3>Prompt Preset Entries</h3>
+          {debug.promptPresetEntries.length === 0 ? (
+            <p>未启用结构化条目。</p>
+          ) : (
+            debug.promptPresetEntries.map((entry) => (
+              <p key={entry.name}>
+                <strong>{entry.name}</strong> · {entry.role} · {entry.chars} 字符<br />
+                {entry.preview}
+              </p>
+            ))
+          )}
+        </section>
+        <section>
+          <h3>世界书触发</h3>
+          {debug.worldBookMatches.length === 0 ? (
+            <p>没有命中世界书条目。</p>
+          ) : (
+            debug.worldBookMatches.map((match, index) => (
+              <p key={`${match.worldBookName}-${match.entryName ?? index}`}>
+                <strong>{match.worldBookName}</strong>
+                {match.entryName ? ` / ${match.entryName}` : ''} ·{' '}
+                {match.insertionPosition}
+                <br />
+                关键词：{match.matchedKeywords.join(', ') || 'constant'}
+                <br />
+                {match.preview}
+              </p>
+            ))
+          )}
+        </section>
+        <section>
+          <h3>最近聊天上下文</h3>
+          {debug.recentHistory.length === 0 ? (
+            <p>没有纳入历史消息，或历史已由 preset marker 接管。</p>
+          ) : (
+            debug.recentHistory.map((item) => (
+              <p key={item.name}>
+                <strong>{item.name}</strong> · {item.role} · {item.chars} 字符<br />
+                {item.preview}
+              </p>
+            ))
+          )}
+        </section>
+        <section>
+          <h3>生成设置</h3>
+          <p>可见思考：{debug.visibleThinkingEnabled ? '已启用' : '未启用'}</p>
+          <p>{debug.generationSettingsSummary}</p>
+        </section>
+        <section>
+          <h3>最终 Messages</h3>
+          {debug.finalMessages.map((message) => (
+            <p key={message.index}>
+              <strong>
+                #{message.index} {message.role}
+              </strong>{' '}
+              · {message.chars} 字符 · 约 {message.estimatedTokens} tokens<br />
+              {message.preview}
+            </p>
+          ))}
+        </section>
+        <section>
+          <h3>截断</h3>
+          {debug.truncated.length === 0 ? (
+            <p>没有截断。</p>
+          ) : (
+            debug.truncated.map((item) => (
+              <p key={item.part}>
+                <strong>{item.part}</strong> 丢弃 {item.droppedCount} 段：{item.reason}
+              </p>
+            ))
+          )}
+        </section>
+      </div>
+    </details>
+  );
+}
 
 interface ChatPanelProps {
   character: CharacterDto;
@@ -52,6 +185,7 @@ export function ChatPanel({
   const lastMessage = messages.at(-1);
   const lastAssistantMessageId =
     lastMessage?.role === 'assistant' ? lastMessage.id : null;
+  const promptDebug = promptDebugFromMessages(messages);
 
   const isAbortError = (err: unknown): boolean =>
     err instanceof Error && err.name === 'AbortError';
@@ -103,6 +237,11 @@ export function ChatPanel({
       conversationId: conversationId ?? '',
       role: 'user',
       content: text,
+      thinkingContent: null,
+      rawContent: null,
+      timing: null,
+      promptDebug: null,
+      selectedVariantId: null,
       createdAt: new Date().toISOString(),
     };
     const assistantMsg: ChatMessage = {
@@ -110,6 +249,12 @@ export function ChatPanel({
       conversationId: conversationId ?? '',
       role: 'assistant',
       content: '',
+      thinkingContent: null,
+      rawContent: null,
+      timing: null,
+      promptDebug: null,
+      selectedVariantId: null,
+      variants: [],
       createdAt: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
@@ -159,13 +304,14 @@ export function ChatPanel({
         },
       );
     } catch (err: unknown) {
+      if (isAbortError(err)) {
+        return;
+      }
       setMessages((prev) => prev.filter((message) => message.id !== pendingId));
       setMessages((prev) =>
         prev.filter((message) => message.id !== pendingAssistantId),
       );
-      if (!isAbortError(err)) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSending(false);
       setStreamingMode(null);
@@ -217,6 +363,22 @@ export function ChatPanel({
         setEditingMessageId(null);
         setEditContent('');
       }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setMutatingMessageId(null);
+    }
+  };
+
+  const handleSelectVariant = async (messageId: string, variantId: string) => {
+    if (!conversationId || actionBusy) return;
+    setError(null);
+    setMutatingMessageId(messageId);
+    try {
+      const res = await selectMessageVariant(conversationId, messageId, variantId);
+      onConversationReady(res.conversation.id, res.activeWorldBookIds);
+      setConversationId(res.conversation.id);
+      setMessages(res.messages);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -302,9 +464,7 @@ export function ChatPanel({
           message.id === originalMessage.id ? originalMessage : message,
         ),
       );
-      if (!isAbortError(err)) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
+      if (!isAbortError(err)) setError(err instanceof Error ? err.message : String(err));
     } finally {
       setRegenerating(false);
       setStreamingMode(null);
@@ -375,6 +535,20 @@ export function ChatPanel({
                   : 'Thinking hidden';
               const hiddenUpdateCount = parts?.updateVariableBlocks.length ?? 0;
               const hiddenStateCount = parts?.variableStateBlocks.length ?? 0;
+              const timingText = formatTiming(m);
+              const variants = m.variants ?? [];
+              const selectedVariantIndex = variants.findIndex(
+                (variant) => variant.id === m.selectedVariantId,
+              );
+              const activeVariantIndex =
+                selectedVariantIndex >= 0 ? selectedVariantIndex : variants.length - 1;
+              const previousVariant = activeVariantIndex > 0
+                ? variants[activeVariantIndex - 1]
+                : null;
+              const nextVariant =
+                activeVariantIndex >= 0 && activeVariantIndex < variants.length - 1
+                  ? variants[activeVariantIndex + 1]
+                  : null;
               return (
               <li className={`message-row message-row--${m.role}`} key={i}>
                 <article className="message-bubble">
@@ -432,6 +606,37 @@ export function ChatPanel({
                           {hiddenStateCount > 0 && <span>Variable state hidden</span>}
                         </div>
                       )}
+                      {timingText !== null && (
+                        <div className="message-timing">{timingText}</div>
+                      )}
+                      {m.role === 'assistant' && variants.length > 1 && (
+                        <div className="message-variants">
+                          <button
+                            className="message-action-button"
+                            type="button"
+                            onClick={() =>
+                              previousVariant &&
+                              void handleSelectVariant(m.id, previousVariant.id)
+                            }
+                            disabled={actionBusy || previousVariant === null}
+                          >
+                            上一版
+                          </button>
+                          <span>
+                            版本 {activeVariantIndex + 1} / {variants.length}
+                          </span>
+                          <button
+                            className="message-action-button"
+                            type="button"
+                            onClick={() =>
+                              nextVariant && void handleSelectVariant(m.id, nextVariant.id)
+                            }
+                            disabled={actionBusy || nextVariant === null}
+                          >
+                            下一版
+                          </button>
+                        </div>
+                      )}
                     </>
                   )}
                   {!m.id.startsWith('pending-') && (
@@ -471,6 +676,8 @@ export function ChatPanel({
           </ol>
         )}
       </div>
+
+      <PromptDebugPanel debug={promptDebug} />
 
       <form className="chat-composer" onSubmit={handleSend}>
         <input

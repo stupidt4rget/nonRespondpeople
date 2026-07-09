@@ -77,6 +77,7 @@ export interface ChatResponse {
   assistantMessage?: ChatMessageDto;
   messages?: ChatMessageDto[];
   activeWorldBookIds?: string[];
+  promptDebug?: PromptAssemblyDebugDto;
 }
 
 export interface RegenerateChatResponse {
@@ -85,6 +86,7 @@ export interface RegenerateChatResponse {
   assistantMessage: ChatMessageDto;
   messages: ChatMessageDto[];
   activeWorldBookIds: string[];
+  promptDebug?: PromptAssemblyDebugDto;
 }
 
 export interface ChatStreamDeltaEvent {
@@ -100,6 +102,7 @@ export interface ChatStreamDoneEvent {
   assistantMessage: ChatMessageDto;
   messages: ChatMessageDto[];
   activeWorldBookIds: string[];
+  promptDebug?: PromptAssemblyDebugDto;
 }
 
 export interface ChatStreamErrorEvent {
@@ -115,12 +118,13 @@ export type ChatStreamEvent =
 export interface LlmSettingsRequest {
   baseUrl: string;
   model: string;
-  apiKey: string;
+  apiKey?: string;
+  clearApiKey?: boolean;
 }
 
 export interface LlmSettingsStatusResponse {
   configured: boolean;
-  source: 'memory' | 'env' | 'none';
+  source: 'database' | 'env' | 'none';
   baseUrl: string | null;
   model: string | null;
   hasApiKey: boolean;
@@ -154,6 +158,7 @@ export interface GenerationSettingsDto {
   maxReplyTokens: number;
   responseCount: number;
   streamEnabled: boolean;
+  visibleThinkingEnabled: boolean;
   temperature: number;
   frequencyPenalty: number;
   presencePenalty: number;
@@ -166,10 +171,81 @@ export interface GenerationSettingsRequest {
   maxReplyTokens?: number;
   responseCount?: number;
   streamEnabled?: boolean;
+  visibleThinkingEnabled?: boolean;
   temperature?: number;
   frequencyPenalty?: number;
   presencePenalty?: number;
   topP?: number;
+}
+
+export interface GenerationTimingDto {
+  startedAt: string;
+  firstTokenAt: string | null;
+  completedAt: string;
+  firstTokenMs: number | null;
+  outputMs: number | null;
+  totalMs: number;
+  stopped: boolean;
+}
+
+export interface AssistantMessageVariantDto {
+  id: string;
+  messageId: string;
+  content: string;
+  thinkingContent: string | null;
+  rawContent: string | null;
+  timing: GenerationTimingDto | null;
+  generationSettingsSnapshot: GenerationSettingsDto | null;
+  createdAt: string;
+}
+
+export interface PromptAssemblyDebugDto {
+  characterSections: PromptAssemblySectionDto[];
+  promptPresetEntries: PromptAssemblySectionDto[];
+  worldBookMatches: PromptAssemblyWorldBookMatchDto[];
+  recentHistory: PromptAssemblySectionDto[];
+  visibleThinkingEnabled: boolean;
+  generationSettingsSummary: string;
+  finalMessages: PromptAssemblyMessageDto[];
+  truncated: PromptAssemblyTruncationDto[];
+  totalChars: number;
+  estimatedTokens: number;
+}
+
+export interface PromptAssemblySectionDto {
+  name: string;
+  role?: 'system' | 'user' | 'assistant';
+  chars: number;
+  estimatedTokens: number;
+  preview: string;
+  truncated?: boolean;
+}
+
+export interface PromptAssemblyWorldBookMatchDto {
+  worldBookName: string;
+  entryName: string | null;
+  keywords: string[];
+  matchedKeywords: string[];
+  insertionPosition: string;
+  chars: number;
+  estimatedTokens: number;
+  preview: string;
+  truncated: boolean;
+}
+
+export interface PromptAssemblyMessageDto {
+  index: number;
+  role: 'system' | 'user' | 'assistant';
+  chars: number;
+  estimatedTokens: number;
+  preview: string;
+  truncated?: boolean;
+}
+
+export interface PromptAssemblyTruncationDto {
+  part: string;
+  droppedCount: number;
+  reason: string;
 }
 
 export type PromptPresetSourceType =
@@ -359,6 +435,12 @@ export interface ChatMessageDto {
   conversationId: string;
   role: 'user' | 'assistant';
   content: string;
+  thinkingContent: string | null;
+  rawContent: string | null;
+  timing: GenerationTimingDto | null;
+  promptDebug: PromptAssemblyDebugDto | null;
+  selectedVariantId: string | null;
+  variants?: AssistantMessageVariantDto[];
   createdAt: string;
 }
 
@@ -375,4 +457,10 @@ export interface UpdateConversationWorldBooksRequest {
 
 export interface UpdateChatMessageRequest {
   content: string;
+}
+
+export interface SelectMessageVariantResponse {
+  conversation: ConversationDto;
+  messages: ChatMessageDto[];
+  activeWorldBookIds: string[];
 }
