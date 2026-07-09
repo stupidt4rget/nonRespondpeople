@@ -3,11 +3,17 @@ import type {
   ChatRequest,
   ChatResponse,
   ChatStreamEvent,
+  GenerationSettingsDto,
+  PromptSettingsDto,
   RegenerateChatResponse,
 } from '@roleagent/shared';
 import type { Character, Conversation, WorldBook } from '@prisma/client';
 import { prisma } from '../db/prisma.js';
-import { getActiveLlmSettings, getActivePromptSettings } from './settings.js';
+import {
+  getActiveGenerationSettings,
+  getActiveLlmSettings,
+  getActivePromptSettings,
+} from './settings.js';
 import { getActivePromptPresetEntries } from './promptPresets.js';
 import {
   ensureConversationReady,
@@ -20,6 +26,7 @@ import { getAssistantVisibleContent } from '../services/assistantMessageParts.js
 import { buildPromptMessages, type PromptMessage } from '../services/promptBuilder.js';
 
 type ActiveLlmSettings = NonNullable<ReturnType<typeof getActiveLlmSettings>>;
+const APPROX_CHARS_PER_TOKEN = 4;
 
 class LlmRequestError extends Error {
   constructor(
@@ -80,6 +87,7 @@ async function loadPromptContext(
 async function requestAssistantReply(
   app: FastifyInstance,
   llmSettings: ActiveLlmSettings,
+  generationSettings: GenerationSettingsDto,
   messages: PromptMessage[],
 ): Promise<string> {
   const url = `${llmSettings.baseUrl.replace(/\/+$/, '')}/chat/completions`;
@@ -92,7 +100,14 @@ async function requestAssistantReply(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${llmSettings.apiKey}`,
       },
-      body: JSON.stringify({ model: llmSettings.model, messages, stream: false }),
+      body: JSON.stringify(
+        buildLlmRequestBody({
+          model: llmSettings.model,
+          messages,
+          stream: false,
+          generationSettings,
+        }),
+      ),
     });
   } catch (err) {
     app.log.error(err);
@@ -157,6 +172,7 @@ function parseSseData(rawEvent: string): string | null {
 async function streamAssistantReply(args: {
   app: FastifyInstance;
   llmSettings: ActiveLlmSettings;
+  generationSettings: GenerationSettingsDto;
   messages: PromptMessage[];
   signal: AbortSignal;
   onDelta: (content: string) => void;
@@ -172,9 +188,12 @@ async function streamAssistantReply(args: {
         Authorization: `Bearer ${args.llmSettings.apiKey}`,
       },
       body: JSON.stringify({
-        model: args.llmSettings.model,
-        messages: args.messages,
-        stream: true,
+        ...buildLlmRequestBody({
+          model: args.llmSettings.model,
+          messages: args.messages,
+          stream: true,
+          generationSettings: args.generationSettings,
+        }),
       }),
       signal: args.signal,
     });
@@ -273,6 +292,40 @@ function sendLlmError(reply: FastifyReply, err: unknown) {
   return reply.code(502).send({ error: 'LLM API request failed' });
 }
 
+function buildLlmRequestBody(args: {
+  model: string;
+  messages: PromptMessage[];
+  stream: boolean;
+  generationSettings: GenerationSettingsDto;
+}) {
+  return {
+    model: args.model,
+    messages: args.messages,
+    stream: args.stream,
+    max_tokens: args.generationSettings.maxReplyTokens,
+    temperature: args.generationSettings.temperature,
+    top_p: args.generationSettings.topP,
+    frequency_penalty: args.generationSettings.frequencyPenalty,
+    presence_penalty: args.generationSettings.presencePenalty,
+  };
+}
+
+function promptLimitsFromGenerationSettings(
+  promptSettings: PromptSettingsDto,
+  generationSettings: GenerationSettingsDto,
+): {
+  maxPromptChars: number;
+  historyBudgetChars: number;
+  worldBookMaxChars: number;
+} {
+  const maxPromptChars = generationSettings.contextLimitTokens * APPROX_CHARS_PER_TOKEN;
+  return {
+    maxPromptChars,
+    historyBudgetChars: Math.min(promptSettings.historyBudgetChars, maxPromptChars),
+    worldBookMaxChars: Math.min(promptSettings.worldBookBudgetChars, maxPromptChars),
+  };
+}
+
 function toPromptHistory(
   messages: Array<{ role: string; content: string }>,
 ): Array<{ role: 'user' | 'assistant'; content: string }> {
@@ -331,6 +384,7 @@ export async function chatRoutes(app: FastifyInstance) {
     } = await loadPromptContext(found, createdConversation);
     const savedMessages = await getConversationMessages(conversation.id);
     const promptSettings = await getActivePromptSettings();
+    const generationSettings = await getActiveGenerationSettings();
     const promptPresetEntries = await getActivePromptPresetEntries();
 
     const prompt = buildPromptMessages({
@@ -340,6 +394,7 @@ export async function chatRoutes(app: FastifyInstance) {
       userMessage: message.trim(),
       promptSettings,
       promptPresetEntries,
+      limits: promptLimitsFromGenerationSettings(promptSettings, generationSettings),
     });
     const messages = prompt.messages;
     if (process.env.ROLEAGENT_PROMPT_DEBUG === '1') {
@@ -348,7 +403,7 @@ export async function chatRoutes(app: FastifyInstance) {
 
     let content: string;
     try {
-      content = await requestAssistantReply(app, llmSettings, messages);
+      content = await requestAssistantReply(app, llmSettings, generationSettings, messages);
     } catch (err) {
       return sendLlmError(reply, err);
     }
@@ -424,6 +479,7 @@ export async function chatRoutes(app: FastifyInstance) {
     } = await loadPromptContext(found, createdConversation);
     const savedMessages = await getConversationMessages(conversation.id);
     const promptSettings = await getActivePromptSettings();
+    const generationSettings = await getActiveGenerationSettings();
     const promptPresetEntries = await getActivePromptPresetEntries();
 
     const prompt = buildPromptMessages({
@@ -433,6 +489,7 @@ export async function chatRoutes(app: FastifyInstance) {
       userMessage: message.trim(),
       promptSettings,
       promptPresetEntries,
+      limits: promptLimitsFromGenerationSettings(promptSettings, generationSettings),
     });
     if (process.env.ROLEAGENT_PROMPT_DEBUG === '1') {
       app.log.info({ prompt: prompt.debug }, 'prompt builder summary');
@@ -454,6 +511,7 @@ export async function chatRoutes(app: FastifyInstance) {
       const content = await streamAssistantReply({
         app,
         llmSettings,
+        generationSettings,
         messages: prompt.messages,
         signal: upstreamController.signal,
         onDelta: (delta) => writeNdjsonEvent(reply, { type: 'delta', content: delta }),
@@ -539,6 +597,7 @@ export async function chatRoutes(app: FastifyInstance) {
 
     const history = toPromptHistory(savedMessages.slice(0, -2));
     const promptSettings = await getActivePromptSettings();
+    const generationSettings = await getActiveGenerationSettings();
     const promptPresetEntries = await getActivePromptPresetEntries();
     const prompt = buildPromptMessages({
       character: existing.character,
@@ -547,6 +606,7 @@ export async function chatRoutes(app: FastifyInstance) {
       userMessage: previousMessage.content,
       promptSettings,
       promptPresetEntries,
+      limits: promptLimitsFromGenerationSettings(promptSettings, generationSettings),
     });
     if (process.env.ROLEAGENT_PROMPT_DEBUG === '1') {
       app.log.info({ prompt: prompt.debug }, 'prompt builder summary');
@@ -554,7 +614,12 @@ export async function chatRoutes(app: FastifyInstance) {
 
     let content: string;
     try {
-      content = await requestAssistantReply(app, llmSettings, prompt.messages);
+      content = await requestAssistantReply(
+        app,
+        llmSettings,
+        generationSettings,
+        prompt.messages,
+      );
     } catch (err) {
       return sendLlmError(reply, err);
     }
@@ -614,6 +679,7 @@ export async function chatRoutes(app: FastifyInstance) {
 
     const history = toPromptHistory(savedMessages.slice(0, -2));
     const promptSettings = await getActivePromptSettings();
+    const generationSettings = await getActiveGenerationSettings();
     const promptPresetEntries = await getActivePromptPresetEntries();
     const prompt = buildPromptMessages({
       character: existing.character,
@@ -622,6 +688,7 @@ export async function chatRoutes(app: FastifyInstance) {
       userMessage: previousMessage.content,
       promptSettings,
       promptPresetEntries,
+      limits: promptLimitsFromGenerationSettings(promptSettings, generationSettings),
     });
     if (process.env.ROLEAGENT_PROMPT_DEBUG === '1') {
       app.log.info({ prompt: prompt.debug }, 'prompt builder summary');
@@ -643,6 +710,7 @@ export async function chatRoutes(app: FastifyInstance) {
       const content = await streamAssistantReply({
         app,
         llmSettings,
+        generationSettings,
         messages: prompt.messages,
         signal: upstreamController.signal,
         onDelta: (delta) => writeNdjsonEvent(reply, { type: 'delta', content: delta }),
