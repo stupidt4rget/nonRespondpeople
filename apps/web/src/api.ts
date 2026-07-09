@@ -9,6 +9,8 @@
   ChatStreamEvent,
   RegenerateChatResponse,
   ImportCharacterCardRequest,
+  GenerationSettingsDto,
+  GenerationSettingsRequest,
   LlmSettingsRequest,
   LlmSettingsStatusResponse,
   DeletePromptPresetResponse,
@@ -189,6 +191,38 @@ export async function resetPromptSettings(): Promise<PromptSettingsDto> {
     return throwApiError(res);
   }
   return (await res.json()) as PromptSettingsDto;
+}
+
+export async function getGenerationSettings(): Promise<GenerationSettingsDto> {
+  const res = await fetch('/api/settings/generation');
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as GenerationSettingsDto;
+}
+
+export async function updateGenerationSettings(
+  body: GenerationSettingsRequest,
+): Promise<GenerationSettingsDto> {
+  const res = await fetch('/api/settings/generation', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as GenerationSettingsDto;
+}
+
+export async function resetGenerationSettings(): Promise<GenerationSettingsDto> {
+  const res = await fetch('/api/settings/generation/reset', {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as GenerationSettingsDto;
 }
 
 export async function previewPromptPresetImport(

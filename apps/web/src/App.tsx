@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { appName } from '@roleagent/shared';
-import type { HealthResponse, CharacterDto } from '@roleagent/shared';
-import { fetchCharacters, createCharacter } from './api';
+import type { HealthResponse, CharacterDto, GenerationSettingsDto } from '@roleagent/shared';
+import { fetchCharacters, createCharacter, getGenerationSettings } from './api';
 import { CharacterDetail } from './components/CharacterDetail';
 import { ChatPanel } from './components/ChatPanel';
 import { CharacterImport } from './components/CharacterImport';
+import { GenerationControls } from './components/GenerationControls';
 import { LlmSettings } from './components/LlmSettings';
 import { PromptSettings } from './components/PromptSettings';
 import { PromptPresetsPanel } from './components/PromptPresetsPanel';
@@ -50,6 +51,8 @@ export function App() {
   const [activeWorldBookIds, setActiveWorldBookIds] = useState<string[]>([]);
   const [worldBookRefreshKey, setWorldBookRefreshKey] = useState(0);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>('chat');
+  const [generationSettings, setGenerationSettings] =
+    useState<GenerationSettingsDto | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,6 +90,20 @@ export function App() {
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getGenerationSettings()
+      .then((settings) => {
+        if (!cancelled) setGenerationSettings(settings);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       });
     return () => {
       cancelled = true;
@@ -259,6 +276,17 @@ export function App() {
               <PromptSettings />
             </CollapsibleSection>
 
+            <CollapsibleSection
+              title="Generation Controls"
+              eyebrow="LLM"
+              defaultOpen={false}
+            >
+              <GenerationControls
+                settings={generationSettings}
+                onSettingsChange={setGenerationSettings}
+              />
+            </CollapsibleSection>
+
             <button
               className={`workspace-nav-button${
                 workspaceView === 'promptPresets' ? ' workspace-nav-button--active' : ''
@@ -332,6 +360,7 @@ export function App() {
             onToggleDetail={() => setDetailOpen((prev) => !prev)}
             activeWorldBookCount={activeWorldBookIds.length}
             onConversationReady={handleConversationReady}
+            streamEnabled={generationSettings?.streamEnabled ?? true}
             detailSlot={
               <CharacterDetail
                 key={selected.id}

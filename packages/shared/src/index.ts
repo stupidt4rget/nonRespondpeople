@@ -148,6 +148,30 @@ export interface PromptSettingsRequest {
   worldBookScanDepth?: number;
 }
 
+export interface GenerationSettingsDto {
+  contextUnlockEnabled: boolean;
+  contextLimitTokens: number;
+  maxReplyTokens: number;
+  responseCount: number;
+  streamEnabled: boolean;
+  temperature: number;
+  frequencyPenalty: number;
+  presencePenalty: number;
+  topP: number;
+}
+
+export interface GenerationSettingsRequest {
+  contextUnlockEnabled?: boolean;
+  contextLimitTokens?: number;
+  maxReplyTokens?: number;
+  responseCount?: number;
+  streamEnabled?: boolean;
+  temperature?: number;
+  frequencyPenalty?: number;
+  presencePenalty?: number;
+  topP?: number;
+}
+
 export type PromptPresetSourceType =
   | 'roleagent'
   | 'st-sysprompt'

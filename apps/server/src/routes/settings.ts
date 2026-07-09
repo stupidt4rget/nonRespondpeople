@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type {
+  GenerationSettingsDto,
+  GenerationSettingsRequest,
   LlmSettingsRequest,
   LlmSettingsStatusResponse,
   PromptSettingsDto,
@@ -14,6 +16,7 @@ interface ActiveLlmSettings {
 }
 
 const PROMPT_SETTINGS_ID = 'default';
+const GENERATION_SETTINGS_ID = 'default';
 const DEFAULT_ROLEPLAY_PRESET = [
   'Stay in character as {{char}}.',
   'Maintain continuity with the character card, worldbook, and conversation.',
@@ -31,6 +34,17 @@ const DEFAULT_PROMPT_SETTINGS: PromptSettingsDto = {
   historyBudgetChars: 12000,
   worldBookBudgetChars: 6000,
   worldBookScanDepth: 3,
+};
+const DEFAULT_GENERATION_SETTINGS: GenerationSettingsDto = {
+  contextUnlockEnabled: false,
+  contextLimitTokens: 200000,
+  maxReplyTokens: 65536,
+  responseCount: 1,
+  streamEnabled: true,
+  temperature: 1,
+  frequencyPenalty: 0,
+  presencePenalty: 0,
+  topP: 1,
 };
 
 let memoryLlmSettings: ActiveLlmSettings | null = null;
@@ -76,6 +90,27 @@ export async function getActivePromptSettings(): Promise<PromptSettingsDto> {
     historyBudgetChars: found.historyBudgetChars,
     worldBookBudgetChars: found.worldBookBudgetChars,
     worldBookScanDepth: found.worldBookScanDepth,
+  };
+}
+
+export async function getActiveGenerationSettings(): Promise<GenerationSettingsDto> {
+  const found = await prisma.generationSettings.findUnique({
+    where: { id: GENERATION_SETTINGS_ID },
+  });
+  if (!found) {
+    return DEFAULT_GENERATION_SETTINGS;
+  }
+
+  return {
+    contextUnlockEnabled: found.contextUnlockEnabled,
+    contextLimitTokens: found.contextLimitTokens,
+    maxReplyTokens: found.maxReplyTokens,
+    responseCount: found.responseCount,
+    streamEnabled: found.streamEnabled,
+    temperature: found.temperature,
+    frequencyPenalty: found.frequencyPenalty,
+    presencePenalty: found.presencePenalty,
+    topP: found.topP,
   };
 }
 
@@ -137,6 +172,18 @@ function boundedInteger(
   return rounded;
 }
 
+function boundedNumber(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  if (value < min) return min;
+  if (value > max) return max;
+  return value;
+}
+
 function normalizePromptSettingsRequest(
   body: PromptSettingsRequest,
   current: PromptSettingsDto,
@@ -180,6 +227,61 @@ function normalizePromptSettingsRequest(
   };
 }
 
+function normalizeGenerationSettingsRequest(
+  body: GenerationSettingsRequest,
+  current: GenerationSettingsDto,
+): GenerationSettingsDto {
+  if (body.responseCount !== undefined && body.responseCount !== 1) {
+    throw new Error('responseCount currently only supports 1');
+  }
+
+  const contextUnlockEnabled =
+    typeof body.contextUnlockEnabled === 'boolean'
+      ? body.contextUnlockEnabled
+      : current.contextUnlockEnabled;
+  const streamEnabled =
+    typeof body.streamEnabled === 'boolean'
+      ? body.streamEnabled
+      : current.streamEnabled;
+  const contextMax = contextUnlockEnabled ? 2000000 : 200000;
+  const contextLimitTokens =
+    typeof body.contextLimitTokens === 'number'
+      ? body.contextLimitTokens
+      : current.contextLimitTokens;
+
+  return {
+    contextUnlockEnabled,
+    contextLimitTokens: boundedInteger(
+      contextLimitTokens,
+      current.contextLimitTokens,
+      1024,
+      contextMax,
+    ),
+    maxReplyTokens: boundedInteger(
+      body.maxReplyTokens,
+      current.maxReplyTokens,
+      1,
+      128000,
+    ),
+    responseCount: 1,
+    streamEnabled,
+    temperature: boundedNumber(body.temperature, current.temperature, 0, 2),
+    frequencyPenalty: boundedNumber(
+      body.frequencyPenalty,
+      current.frequencyPenalty,
+      -2,
+      2,
+    ),
+    presencePenalty: boundedNumber(
+      body.presencePenalty,
+      current.presencePenalty,
+      -2,
+      2,
+    ),
+    topP: boundedNumber(body.topP, current.topP, 0, 1),
+  };
+}
+
 async function savePromptSettings(
   settings: PromptSettingsDto,
 ): Promise<PromptSettingsDto> {
@@ -204,6 +306,31 @@ async function savePromptSettings(
   };
 }
 
+async function saveGenerationSettings(
+  settings: GenerationSettingsDto,
+): Promise<GenerationSettingsDto> {
+  const saved = await prisma.generationSettings.upsert({
+    where: { id: GENERATION_SETTINGS_ID },
+    create: {
+      id: GENERATION_SETTINGS_ID,
+      ...settings,
+    },
+    update: settings,
+  });
+
+  return {
+    contextUnlockEnabled: saved.contextUnlockEnabled,
+    contextLimitTokens: saved.contextLimitTokens,
+    maxReplyTokens: saved.maxReplyTokens,
+    responseCount: saved.responseCount,
+    streamEnabled: saved.streamEnabled,
+    temperature: saved.temperature,
+    frequencyPenalty: saved.frequencyPenalty,
+    presencePenalty: saved.presencePenalty,
+    topP: saved.topP,
+  };
+}
+
 export async function settingsRoutes(app: FastifyInstance) {
   app.get('/api/settings/llm', async () => {
     return getLlmSettingsStatus();
@@ -211,6 +338,10 @@ export async function settingsRoutes(app: FastifyInstance) {
 
   app.get('/api/settings/prompt', async () => {
     return getActivePromptSettings();
+  });
+
+  app.get('/api/settings/generation', async () => {
+    return getActiveGenerationSettings();
   });
 
   app.put('/api/settings/prompt', async (req, reply) => {
@@ -228,6 +359,29 @@ export async function settingsRoutes(app: FastifyInstance) {
 
   app.post('/api/settings/prompt/reset', async () => {
     return savePromptSettings(DEFAULT_PROMPT_SETTINGS);
+  });
+
+  app.put('/api/settings/generation', async (req, reply) => {
+    if (!isPlainObject(req.body)) {
+      return reply.code(400).send({ error: 'request body must be an object' });
+    }
+
+    const current = await getActiveGenerationSettings();
+    try {
+      const next = normalizeGenerationSettingsRequest(
+        req.body as GenerationSettingsRequest,
+        current,
+      );
+      return saveGenerationSettings(next);
+    } catch (err) {
+      return reply
+        .code(400)
+        .send({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post('/api/settings/generation/reset', async () => {
+    return saveGenerationSettings(DEFAULT_GENERATION_SETTINGS);
   });
 
   app.post('/api/settings/llm', async (req, reply) => {

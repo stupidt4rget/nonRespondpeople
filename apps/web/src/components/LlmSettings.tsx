@@ -9,7 +9,6 @@ const STORAGE_KEY = 'roleagent.llmSettings';
 interface StoredLlmSettings {
   baseUrl: string;
   model: string;
-  apiKey: string;
 }
 
 function getStatusText(status: LlmSettingsStatusResponse | null): string {
@@ -29,9 +28,11 @@ function readStoredSettings(): StoredLlmSettings | null {
     const parsed = JSON.parse(raw) as Partial<StoredLlmSettings>;
     const baseUrl = typeof parsed.baseUrl === 'string' ? parsed.baseUrl : '';
     const model = typeof parsed.model === 'string' ? parsed.model : '';
-    const apiKey = typeof parsed.apiKey === 'string' ? parsed.apiKey : '';
-    if (!baseUrl && !model && !apiKey) return null;
-    return { baseUrl, model, apiKey };
+    if ('apiKey' in parsed) {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ baseUrl, model }));
+    }
+    if (!baseUrl && !model) return null;
+    return { baseUrl, model };
   } catch {
     return null;
   }
@@ -39,14 +40,6 @@ function readStoredSettings(): StoredLlmSettings | null {
 
 function writeStoredSettings(settings: StoredLlmSettings): void {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-}
-
-function hasCompleteSettings(settings: StoredLlmSettings): boolean {
-  return (
-    settings.baseUrl.trim() !== '' &&
-    settings.model.trim() !== '' &&
-    settings.apiKey.trim() !== ''
-  );
 }
 
 export function LlmSettings() {
@@ -67,25 +60,13 @@ export function LlmSettings() {
       setHasStoredSettings(true);
       setBaseUrl(stored.baseUrl);
       setModel(stored.model);
-      setApiKey(stored.apiKey);
     }
     setLoading(true);
     getLlmSettings()
       .then(async (res) => {
         if (cancelled) return;
         setStatus(res);
-        if (stored) {
-          if (hasCompleteSettings(stored)) {
-            const saved = await saveLlmSettings({
-              baseUrl: stored.baseUrl.trim(),
-              model: stored.model.trim(),
-              apiKey: stored.apiKey.trim(),
-            });
-            if (cancelled) return;
-            setStatus(saved);
-            setSuccess('已从本机保存的 API 配置恢复到当前后端进程。');
-          }
-        } else {
+        if (!stored) {
           setBaseUrl(res.baseUrl ?? '');
           setModel(res.model ?? '');
         }
@@ -130,14 +111,13 @@ export function LlmSettings() {
       writeStoredSettings({
         baseUrl: baseUrl.trim(),
         model: model.trim(),
-        apiKey: apiKey.trim(),
       });
       setHasStoredSettings(true);
       setStatus(res);
       setBaseUrl(res.baseUrl ?? baseUrl.trim());
       setModel(res.model ?? model.trim());
       setApiKey(apiKey.trim());
-      setSuccess('模型设置已保存到当前后端进程，并保存到本机。');
+      setSuccess('模型设置已保存到当前后端进程；本机仅保存 Base URL 和模型草稿。');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -149,7 +129,7 @@ export function LlmSettings() {
     window.localStorage.removeItem(STORAGE_KEY);
     setHasStoredSettings(false);
     setApiKey('');
-    setSuccess('已清除本机保存的 API 配置。当前后端进程中的配置不会被清除。');
+    setSuccess('已清除本机保存的 Base URL 和模型草稿。当前后端进程中的配置不会被清除。');
     setError(null);
   };
 
@@ -175,7 +155,7 @@ export function LlmSettings() {
         </p>
       )}
       <p className="secret-hint">
-        API Key 将保存在本机浏览器/桌面应用数据中。
+        API Key 只发送到当前后端进程；前端本机只保存 Base URL 和模型草稿。
       </p>
 
       <form className="stacked-form" onSubmit={handleSave}>

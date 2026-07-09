@@ -4,6 +4,8 @@ import {
   clearConversationMessages,
   deleteChatMessage,
   getCharacterConversation,
+  regenerateLastAssistant,
+  sendChat,
   streamChat,
   streamRegenerate,
   updateChatMessage,
@@ -19,6 +21,7 @@ interface ChatPanelProps {
   detailSlot: ReactNode;
   activeWorldBookCount: number;
   onConversationReady: (conversationId: string, activeWorldBookIds: string[]) => void;
+  streamEnabled: boolean;
 }
 
 export function ChatPanel({
@@ -28,6 +31,7 @@ export function ChatPanel({
   detailSlot,
   activeWorldBookCount,
   onConversationReady,
+  streamEnabled,
 }: ChatPanelProps) {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -111,10 +115,23 @@ export function ChatPanel({
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setInput('');
     setSending(true);
-    setStreamingMode('send');
-    const abortController = new AbortController();
-    streamAbortControllerRef.current = abortController;
     try {
+      if (!streamEnabled) {
+        const res = await sendChat({
+          characterId: character.id,
+          message: text,
+        });
+        if (!res.conversation || !res.messages || !res.activeWorldBookIds) {
+          throw new Error('Chat response missing conversation data');
+        }
+        onConversationReady(res.conversation.id, res.activeWorldBookIds);
+        setConversationId(res.conversation.id);
+        setMessages(res.messages);
+        return;
+      }
+      setStreamingMode('send');
+      const abortController = new AbortController();
+      streamAbortControllerRef.current = abortController;
       await streamChat(
         {
           characterId: character.id,
@@ -232,10 +249,6 @@ export function ChatPanel({
     if (!originalMessage) return;
     setError(null);
     setRegenerating(true);
-    setStreamingMode('regenerate');
-    const abortController = new AbortController();
-    streamAbortControllerRef.current = abortController;
-    let partialContent = '';
     setMessages((prev) =>
       prev.map((message) =>
         message.id === lastAssistantMessageId
@@ -244,6 +257,22 @@ export function ChatPanel({
       ),
     );
     try {
+      if (!streamEnabled) {
+        const res = await regenerateLastAssistant(conversationId);
+        if (!res.conversation || !res.messages || !res.activeWorldBookIds) {
+          throw new Error('Regenerate response missing conversation data');
+        }
+        onConversationReady(res.conversation.id, res.activeWorldBookIds);
+        setConversationId(res.conversation.id);
+        setMessages(res.messages);
+        setEditingMessageId(null);
+        setEditContent('');
+        return;
+      }
+      setStreamingMode('regenerate');
+      const abortController = new AbortController();
+      streamAbortControllerRef.current = abortController;
+      let partialContent = '';
       await streamRegenerate(conversationId, {
         signal: abortController.signal,
         onEvent: (event) => {

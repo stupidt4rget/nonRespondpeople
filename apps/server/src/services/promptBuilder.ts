@@ -47,6 +47,11 @@ export interface PromptDebugInfo {
   activatedWorldBookEntries: number;
   droppedHistoryMessages: number;
   totalChars: number;
+  limits: {
+    maxPromptChars: number;
+    historyBudgetChars: number;
+    worldBookMaxChars: number;
+  };
   messageOutline: Array<{
     index: number;
     role: PromptRole;
@@ -919,6 +924,11 @@ export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOut
       activatedWorldBookEntries: worldBook.activatedCount,
       droppedHistoryMessages: trimmedHistory.dropped,
       totalChars: countMessageChars(messages),
+      limits: {
+        maxPromptChars: limits.maxPromptChars,
+        historyBudgetChars: limits.historyBudgetChars,
+        worldBookMaxChars: limits.worldBookMaxChars,
+      },
       messageOutline: buildMessageOutline(messages),
     },
   };

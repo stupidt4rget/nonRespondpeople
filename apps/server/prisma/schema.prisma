@@ -92,6 +92,21 @@ model PromptSettings {
   updatedAt            DateTime @updatedAt
 }
 
+model GenerationSettings {
+  id                   String   @id
+  contextUnlockEnabled Boolean  @default(false)
+  contextLimitTokens   Int      @default(200000)
+  maxReplyTokens       Int      @default(65536)
+  responseCount        Int      @default(1)
+  streamEnabled        Boolean  @default(true)
+  temperature          Float    @default(1)
+  frequencyPenalty     Float    @default(0)
+  presencePenalty      Float    @default(0)
+  topP                 Float    @default(1)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
 model PromptPreset {
   id                String   @id @default(cuid())
   name              String
