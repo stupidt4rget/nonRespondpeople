@@ -1,4 +1,4 @@
-import type { PromptSettingsDto } from '@roleagent/shared';
+import type { PromptPresetEntryDto, PromptSettingsDto } from '@roleagent/shared';
 
 export type PromptRole = 'system' | 'user' | 'assistant';
 
@@ -31,6 +31,7 @@ export interface PromptBuilderInput {
   history: Array<{ role: 'user' | 'assistant'; content: string }>;
   userMessage: string;
   promptSettings?: PromptSettingsDto;
+  promptPresetEntries?: PromptPresetEntryDto[];
   userName?: string;
   limits?: {
     maxPromptChars?: number;
@@ -77,6 +78,14 @@ interface ParsedWorldBookEntry {
   order: number;
   sourceIndex: number;
 }
+
+interface PresetEntryMessagesResult {
+  messages: PromptMessage[];
+  hasLoreMarker: boolean;
+  hasChatHistoryMarker: boolean;
+}
+
+type PresetMarkerName = 'chathistory' | 'Lore';
 
 const DEFAULT_MAX_PROMPT_CHARS = 24000;
 const DEFAULT_HISTORY_BUDGET_CHARS = 12000;
@@ -181,6 +190,149 @@ function systemMessage(
     userPersona,
   ).trim();
   return rendered.length > 0 ? { role: 'system', content: rendered } : null;
+}
+
+function presetEntryMessages(
+  entries: PromptPresetEntryDto[] | undefined,
+  character: PromptCharacter,
+  userName: string,
+  userPersona: string,
+  userMessage: string,
+  historyText: string,
+  loreText: string,
+): PresetEntryMessagesResult {
+  if (!entries || entries.length === 0) {
+    return { messages: [], hasLoreMarker: false, hasChatHistoryMarker: false };
+  }
+  const orderedEntries = entries
+    .filter((entry) => entry.enabled && !entry.marker && normalizeOptionalText(entry.content))
+    .sort((a, b) => a.orderIndex - b.orderIndex);
+  const lastUserMessage = substituteMacros(userMessage, character, userName, userPersona);
+  return renderPresetEntrySequence(orderedEntries, {
+    character,
+    userName,
+    userPersona,
+    lastUserMessage,
+    historyText,
+    loreText,
+  });
+}
+
+function renderPresetEntrySequence(
+  entries: PromptPresetEntryDto[],
+  args: {
+    character: PromptCharacter;
+    userName: string;
+    userPersona: string;
+    lastUserMessage: string;
+    historyText: string;
+    loreText: string;
+  },
+): PresetEntryMessagesResult {
+  const messages: PromptMessage[] = [];
+  let hasLoreMarker = false;
+  let hasChatHistoryMarker = false;
+  let index = 0;
+
+  while (index < entries.length) {
+    const entry = entries[index];
+    if (!entry) {
+      index += 1;
+      continue;
+    }
+
+    const crossEntryMarker = findCrossEntryMarkerBlock(entries, index);
+    if (crossEntryMarker) {
+      if (crossEntryMarker.name === 'Lore') {
+        hasLoreMarker = true;
+      } else {
+        hasChatHistoryMarker = true;
+      }
+      const content =
+        crossEntryMarker.name === 'Lore' ? args.loreText.trim() : args.historyText.trim();
+      if (content) messages.push({ role: entry.role, content });
+      index = crossEntryMarker.endIndex + 1;
+      continue;
+    }
+
+    if (hasTagMarker(entry.content, 'Lore')) hasLoreMarker = true;
+    if (hasTagMarker(entry.content, 'chathistory')) hasChatHistoryMarker = true;
+    const content = renderSillyTavernCompatPrompt(entry.content, args);
+    if (content) messages.push({ role: entry.role, content });
+    index += 1;
+  }
+
+  return { messages, hasLoreMarker, hasChatHistoryMarker };
+}
+
+function findCrossEntryMarkerBlock(
+  entries: PromptPresetEntryDto[],
+  startIndex: number,
+): { name: PresetMarkerName; endIndex: number } | null {
+  const startEntry = entries[startIndex];
+  if (!startEntry) return null;
+  const markerNames: PresetMarkerName[] = ['chathistory', 'Lore'];
+
+  for (const name of markerNames) {
+    if (!hasOpeningTag(startEntry.content, name) || hasTagMarker(startEntry.content, name)) {
+      continue;
+    }
+
+    for (let endIndex = startIndex + 1; endIndex < entries.length; endIndex += 1) {
+      const endEntry = entries[endIndex];
+      if (endEntry && hasClosingTag(endEntry.content, name)) {
+        return { name, endIndex };
+      }
+    }
+  }
+
+  return null;
+}
+
+function hasTagMarker(value: string, tagName: string): boolean {
+  return new RegExp(`<${tagName}\\b[^>]*>[\\s\\S]*?<\\/${tagName}>`, 'i').test(value);
+}
+
+function hasOpeningTag(value: string, tagName: string): boolean {
+  return new RegExp(`<${tagName}\\b[^>]*>`, 'i').test(value);
+}
+
+function hasClosingTag(value: string, tagName: string): boolean {
+  return new RegExp(`<\\/${tagName}>`, 'i').test(value);
+}
+
+function replaceTagBlock(value: string, tagName: string, replacement: string): string {
+  return value.replace(
+    new RegExp(`<${tagName}\\b[^>]*>[\\s\\S]*?<\\/${tagName}>`, 'gi'),
+    replacement,
+  );
+}
+
+function renderSillyTavernCompatPrompt(
+  value: string,
+  args: {
+    character: PromptCharacter;
+    userName: string;
+    userPersona: string;
+    lastUserMessage: string;
+    historyText: string;
+    loreText: string;
+  },
+): string {
+  return replaceTagBlock(
+    replaceTagBlock(
+      substituteMacros(value, args.character, args.userName, args.userPersona)
+        .replace(/{{!--[\s\S]*?--}}/g, '')
+        .replace(/{{\s*\/\/[^}]*}}/g, '')
+        .replace(/{{\s*(?:setvar|getvar)::[^}]*}}/gi, '')
+        .replace(/{{\s*trim\s*}}/gi, '')
+        .replace(/{{\s*(?:lastusermessage|last_user_message)\s*}}/gi, args.lastUserMessage),
+      'chathistory',
+      args.historyText,
+    ),
+    'Lore',
+    args.loreText,
+  ).trim();
 }
 
 function parseJson(value: string): unknown {
@@ -505,6 +657,58 @@ function trimHistory(
   return { messages: selected.reverse(), dropped };
 }
 
+function formatHistoryForMarker(
+  history: Array<{ role: 'user' | 'assistant'; content: string }>,
+  maxChars: number,
+  character: PromptCharacter,
+  userName: string,
+  userPersona: string,
+): { content: string; dropped: number } {
+  if (maxChars <= 0) {
+    return { content: '', dropped: history.length };
+  }
+
+  const selected: string[] = [];
+  let used = 0;
+  let dropped = 0;
+
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const message = history[index];
+    if (!message) continue;
+    const speaker = message.role === 'user' ? userName : 'Assistant';
+    const content = substituteMacros(
+      message.content,
+      character,
+      userName,
+      userPersona,
+    ).trim();
+    if (!content) continue;
+    const line = `${speaker}: ${content}`;
+    const cost = line.length + (selected.length > 0 ? 1 : 0);
+    if (used + cost > maxChars) {
+      if (selected.length === 0) {
+        selected.unshift(clipText(line, maxChars));
+        used = selected[0]?.length ?? 0;
+      } else {
+        dropped += 1;
+      }
+      continue;
+    }
+    selected.unshift(line);
+    used += cost;
+  }
+
+  return { content: selected.join('\n'), dropped };
+}
+
+function worldBookMarkerText(message: PromptMessage | null): string {
+  if (!message) return '';
+  const prefix = 'Relevant worldbook entries:\n\n';
+  return message.content.startsWith(prefix)
+    ? message.content.slice(prefix.length)
+    : message.content;
+}
+
 export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOutput {
   const promptSettings = input.promptSettings ?? DEFAULT_PROMPT_SETTINGS;
   const userName = input.userName ?? promptSettings.userName ?? 'User';
@@ -529,7 +733,34 @@ export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOut
       DEFAULT_WORLDBOOK_SCAN_DEPTH,
   };
 
-  const characterSections: string[] = ['base'];
+  const worldBook = buildWorldBookBlock({
+    character: input.character,
+    userName,
+    userPersona,
+    worldBooks: input.worldBooks,
+    history: input.history,
+    userMessage: input.userMessage,
+    maxChars: limits.worldBookMaxChars,
+    scanDepth: limits.worldBookScanDepth,
+  });
+  const markerHistory = formatHistoryForMarker(
+    input.history,
+    Math.min(limits.historyBudgetChars, limits.maxPromptChars),
+    input.character,
+    userName,
+    userPersona,
+  );
+  const activePreset = presetEntryMessages(
+    input.promptPresetEntries,
+    input.character,
+    userName,
+    userPersona,
+    input.userMessage,
+    markerHistory.content,
+    worldBookMarkerText(worldBook.message),
+  );
+  const characterSections: string[] =
+    activePreset.messages.length > 0 ? ['activePromptPreset'] : ['base'];
   const personality =
     normalizeOptionalText(input.character.personality) ??
     normalizeOptionalText(input.character.persona);
@@ -541,12 +772,15 @@ export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOut
     userName,
     userPersona,
   );
-  const fixedMessages: PromptMessage[] = [
-    {
-      role: 'system',
-      content: baseInstruction,
-    },
-  ];
+  const fixedMessages: PromptMessage[] =
+    activePreset.messages.length > 0
+      ? [...activePreset.messages]
+      : [
+          {
+            role: 'system',
+            content: baseInstruction,
+          },
+        ];
 
   const personaMessage = systemMessage(
     userPersona ? `User persona:\n${userPersona}` : null,
@@ -606,17 +840,7 @@ export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOut
     characterSections.push('scenario');
   }
 
-  const worldBook = buildWorldBookBlock({
-    character: input.character,
-    userName,
-    userPersona,
-    worldBooks: input.worldBooks,
-    history: input.history,
-    userMessage: input.userMessage,
-    maxChars: limits.worldBookMaxChars,
-    scanDepth: limits.worldBookScanDepth,
-  });
-  if (worldBook.message) fixedMessages.push(worldBook.message);
+  if (worldBook.message && !activePreset.hasLoreMarker) fixedMessages.push(worldBook.message);
 
   const examples = buildExampleMessages(
     input.character,
@@ -669,13 +893,15 @@ export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOut
     0,
     Math.min(limits.historyBudgetChars, limits.maxPromptChars - fixedCost),
   );
-  const trimmedHistory = trimHistory(
-    input.history,
-    remainingForHistory,
-    input.character,
-    userName,
-    userPersona,
-  );
+  const trimmedHistory = activePreset.hasChatHistoryMarker
+    ? { messages: [], dropped: markerHistory.dropped }
+    : trimHistory(
+        input.history,
+        remainingForHistory,
+        input.character,
+        userName,
+        userPersona,
+      );
 
   const messages = [
     ...fixedMessages,

@@ -7,11 +7,13 @@ import { ChatPanel } from './components/ChatPanel';
 import { CharacterImport } from './components/CharacterImport';
 import { LlmSettings } from './components/LlmSettings';
 import { PromptSettings } from './components/PromptSettings';
+import { PromptPresetsPanel } from './components/PromptPresetsPanel';
 import { CollapsibleSection } from './components/CollapsibleSection';
 import { WorldBookPanel } from './components/WorldBookPanel';
 import './App.css';
 
 type ConnectionState = 'checking' | 'connected' | 'error';
+type WorkspaceView = 'chat' | 'promptPresets';
 
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -47,6 +49,7 @@ export function App() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [activeWorldBookIds, setActiveWorldBookIds] = useState<string[]>([]);
   const [worldBookRefreshKey, setWorldBookRefreshKey] = useState(0);
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>('chat');
 
   useEffect(() => {
     let cancelled = false;
@@ -105,6 +108,7 @@ export function App() {
       });
       setCharacters((prev) => [created, ...prev]);
       setSelectedId(created.id);
+      setWorkspaceView('chat');
       setDetailOpen(false);
       setConversationId(null);
       setActiveWorldBookIds([]);
@@ -126,6 +130,7 @@ export function App() {
   const handleImported = (created: CharacterDto) => {
     setCharacters((prev) => [created, ...prev]);
     setSelectedId(created.id);
+    setWorkspaceView('chat');
     setDetailOpen(false);
     setConversationId(null);
     setActiveWorldBookIds([]);
@@ -218,6 +223,7 @@ export function App() {
                         key={c.id}
                         onClick={() => {
                           setSelectedId(c.id);
+                          setWorkspaceView('chat');
                           setDetailOpen(false);
                           setConversationId(null);
                           setActiveWorldBookIds([]);
@@ -252,6 +258,17 @@ export function App() {
             >
               <PromptSettings />
             </CollapsibleSection>
+
+            <button
+              className={`workspace-nav-button${
+                workspaceView === 'promptPresets' ? ' workspace-nav-button--active' : ''
+              }`}
+              type="button"
+              onClick={() => setWorkspaceView('promptPresets')}
+            >
+              <span>Prompt Presets</span>
+              <small>Structured prompt library</small>
+            </button>
 
             <CollapsibleSection
               title="世界书"
@@ -305,7 +322,9 @@ export function App() {
       </aside>
 
       <section className="app-workspace" aria-label="Character workspace">
-        {selected !== null ? (
+        {workspaceView === 'promptPresets' ? (
+          <PromptPresetsPanel />
+        ) : selected !== null ? (
           <ChatPanel
             key={`chat-${selected.id}`}
             character={selected}

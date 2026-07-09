@@ -8,6 +8,7 @@ import type {
 import type { Character, Conversation, WorldBook } from '@prisma/client';
 import { prisma } from '../db/prisma.js';
 import { getActiveLlmSettings, getActivePromptSettings } from './settings.js';
+import { getActivePromptPresetEntries } from './promptPresets.js';
 import {
   ensureConversationReady,
   getConversationMessages,
@@ -15,6 +16,7 @@ import {
   toChatMessageDto,
   toConversationDto,
 } from './conversations.js';
+import { getAssistantVisibleContent } from '../services/assistantMessageParts.js';
 import { buildPromptMessages, type PromptMessage } from '../services/promptBuilder.js';
 
 type ActiveLlmSettings = NonNullable<ReturnType<typeof getActiveLlmSettings>>;
@@ -271,6 +273,21 @@ function sendLlmError(reply: FastifyReply, err: unknown) {
   return reply.code(502).send({ error: 'LLM API request failed' });
 }
 
+function toPromptHistory(
+  messages: Array<{ role: string; content: string }>,
+): Array<{ role: 'user' | 'assistant'; content: string }> {
+  return messages.map((message) => {
+    const role = message.role === 'user' ? 'user' : 'assistant';
+    return {
+      role,
+      content:
+        role === 'assistant'
+          ? getAssistantVisibleContent(message.content)
+          : message.content,
+    };
+  });
+}
+
 export async function chatRoutes(app: FastifyInstance) {
   app.post('/api/chat', async (req, reply) => {
     if (!isPlainObject(req.body)) {
@@ -314,16 +331,15 @@ export async function chatRoutes(app: FastifyInstance) {
     } = await loadPromptContext(found, createdConversation);
     const savedMessages = await getConversationMessages(conversation.id);
     const promptSettings = await getActivePromptSettings();
+    const promptPresetEntries = await getActivePromptPresetEntries();
 
     const prompt = buildPromptMessages({
       character: found,
       worldBooks,
-      history: savedMessages.map((m) => ({
-        role: m.role === 'user' ? 'user' : 'assistant',
-        content: m.content,
-      })),
+      history: toPromptHistory(savedMessages),
       userMessage: message.trim(),
       promptSettings,
+      promptPresetEntries,
     });
     const messages = prompt.messages;
     if (process.env.ROLEAGENT_PROMPT_DEBUG === '1') {
@@ -408,16 +424,15 @@ export async function chatRoutes(app: FastifyInstance) {
     } = await loadPromptContext(found, createdConversation);
     const savedMessages = await getConversationMessages(conversation.id);
     const promptSettings = await getActivePromptSettings();
+    const promptPresetEntries = await getActivePromptPresetEntries();
 
     const prompt = buildPromptMessages({
       character: found,
       worldBooks,
-      history: savedMessages.map((m) => ({
-        role: m.role === 'user' ? 'user' : 'assistant',
-        content: m.content,
-      })),
+      history: toPromptHistory(savedMessages),
       userMessage: message.trim(),
       promptSettings,
+      promptPresetEntries,
     });
     if (process.env.ROLEAGENT_PROMPT_DEBUG === '1') {
       app.log.info({ prompt: prompt.debug }, 'prompt builder summary');
@@ -522,17 +537,16 @@ export async function chatRoutes(app: FastifyInstance) {
         .send({ error: 'assistant message must follow a user message to regenerate' });
     }
 
-    const history = savedMessages.slice(0, -2).map((m) => ({
-      role: m.role === 'user' ? 'user' as const : 'assistant' as const,
-      content: m.content,
-    }));
+    const history = toPromptHistory(savedMessages.slice(0, -2));
     const promptSettings = await getActivePromptSettings();
+    const promptPresetEntries = await getActivePromptPresetEntries();
     const prompt = buildPromptMessages({
       character: existing.character,
       worldBooks,
       history,
       userMessage: previousMessage.content,
       promptSettings,
+      promptPresetEntries,
     });
     if (process.env.ROLEAGENT_PROMPT_DEBUG === '1') {
       app.log.info({ prompt: prompt.debug }, 'prompt builder summary');
@@ -598,17 +612,16 @@ export async function chatRoutes(app: FastifyInstance) {
         .send({ error: 'assistant message must follow a user message to regenerate' });
     }
 
-    const history = savedMessages.slice(0, -2).map((m) => ({
-      role: m.role === 'user' ? 'user' as const : 'assistant' as const,
-      content: m.content,
-    }));
+    const history = toPromptHistory(savedMessages.slice(0, -2));
     const promptSettings = await getActivePromptSettings();
+    const promptPresetEntries = await getActivePromptPresetEntries();
     const prompt = buildPromptMessages({
       character: existing.character,
       worldBooks,
       history,
       userMessage: previousMessage.content,
       promptSettings,
+      promptPresetEntries,
     });
     if (process.env.ROLEAGENT_PROMPT_DEBUG === '1') {
       app.log.info({ prompt: prompt.debug }, 'prompt builder summary');

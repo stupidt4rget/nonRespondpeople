@@ -8,6 +8,7 @@ import {
   streamRegenerate,
   updateChatMessage,
 } from '../api';
+import { splitAssistantMessageParts } from '../utils/assistantMessageParts';
 
 type ChatMessage = ChatMessageDto;
 
@@ -330,7 +331,22 @@ export function ChatPanel({
         )}
         {!loading && messages.length > 0 && (
           <ol className="message-list">
-            {messages.map((m, i) => (
+            {messages.map((m, i) => {
+              const parts = m.role === 'assistant'
+                ? splitAssistantMessageParts(m.content)
+                : null;
+              const visibleContent = parts?.visibleContent ?? m.content;
+              const thinkingBlocks = parts?.thinkingBlocks ?? [];
+              const isStreamingMessage =
+                m.id.startsWith('pending-') ||
+                (streamingMode !== null && m.id === lastAssistantMessageId);
+              const thinkingSummary =
+                isStreamingMessage || parts?.hasOpenThinkingBlock
+                  ? 'Thinking...'
+                  : 'Thinking hidden';
+              const hiddenUpdateCount = parts?.updateVariableBlocks.length ?? 0;
+              const hiddenStateCount = parts?.variableStateBlocks.length ?? 0;
+              return (
               <li className={`message-row message-row--${m.role}`} key={i}>
                 <article className="message-bubble">
                   <span className="message-role">
@@ -373,7 +389,21 @@ export function ChatPanel({
                       </div>
                     </form>
                   ) : (
-                    <p>{m.content}</p>
+                    <>
+                      {thinkingBlocks.length > 0 && (
+                        <details className="message-thinking">
+                          <summary>{thinkingSummary}</summary>
+                          <pre>{thinkingBlocks.join('\n\n')}</pre>
+                        </details>
+                      )}
+                      <p>{visibleContent}</p>
+                      {(hiddenUpdateCount > 0 || hiddenStateCount > 0) && (
+                        <div className="message-hidden-parts">
+                          {hiddenUpdateCount > 0 && <span>Variable update hidden</span>}
+                          {hiddenStateCount > 0 && <span>Variable state hidden</span>}
+                        </div>
+                      )}
+                    </>
                   )}
                   {!m.id.startsWith('pending-') && (
                     <div className="message-actions">
@@ -407,7 +437,8 @@ export function ChatPanel({
                   )}
                 </article>
               </li>
-            ))}
+              );
+            })}
           </ol>
         )}
       </div>

@@ -91,3 +91,43 @@ model PromptSettings {
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 }
+
+model PromptPreset {
+  id                String   @id @default(cuid())
+  name              String
+  sourceType        String
+  isActive          Boolean  @default(false)
+  importedAt        DateTime?
+  warningsJson      String?
+  ignoredFieldsJson String?
+  originalFileName  String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  entries PromptPresetEntry[]
+
+  @@index([isActive])
+  @@index([updatedAt])
+}
+
+model PromptPresetEntry {
+  id                String   @id @default(cuid())
+  presetId          String
+  identifier        String?
+  name              String
+  role              String
+  enabled           Boolean  @default(true)
+  content           String
+  orderIndex        Int
+  marker            Boolean  @default(false)
+  injectionPosition String?
+  injectionDepth    Int?
+  injectionOrder    Int?
+  rawMetadataJson   String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  preset PromptPreset @relation(fields: [presetId], references: [id], onDelete: Cascade)
+
+  @@index([presetId, orderIndex])
+}
