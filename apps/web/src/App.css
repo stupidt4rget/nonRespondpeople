@@ -607,6 +607,21 @@
   background: rgba(255, 255, 255, 0.72);
 }
 
+.message-timing,
+.message-variants {
+  margin-top: 8px;
+  color: #6e6e73;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.message-variants {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .message-actions {
   display: flex;
   flex-wrap: wrap;
@@ -699,6 +714,56 @@
 
 .chat-composer .notice {
   grid-column: 1 / -1;
+}
+
+.prompt-debug-panel {
+  flex: 0 0 auto;
+  border-top: 1px solid #e5e5e5;
+  padding: 10px 20px;
+  background: #fafafa;
+}
+
+.prompt-debug-panel summary {
+  cursor: pointer;
+  color: #343541;
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.prompt-debug-empty {
+  margin: 8px 0 0;
+  color: #6e6e73;
+  font-size: 0.84rem;
+}
+
+.prompt-debug-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  max-height: 32vh;
+  overflow: auto;
+  margin-top: 10px;
+}
+
+.prompt-debug-grid section {
+  border: 1px solid #e3e3e7;
+  border-radius: 8px;
+  padding: 10px;
+  background: #ffffff;
+}
+
+.prompt-debug-grid h3 {
+  margin: 0 0 8px;
+  color: #202123;
+  font-size: 0.82rem;
+}
+
+.prompt-debug-grid p {
+  margin: 0 0 8px;
+  color: #4f4f55;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 /* V0.7 chat-first layout polish */

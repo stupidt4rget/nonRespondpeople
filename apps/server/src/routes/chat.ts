@@ -4,6 +4,7 @@ import type {
   ChatResponse,
   ChatStreamEvent,
   GenerationSettingsDto,
+  GenerationTimingDto,
   PromptSettingsDto,
   RegenerateChatResponse,
 } from '@roleagent/shared';
@@ -22,10 +23,13 @@ import {
   toChatMessageDto,
   toConversationDto,
 } from './conversations.js';
-import { getAssistantVisibleContent } from '../services/assistantMessageParts.js';
+import {
+  getAssistantVisibleContent,
+  splitAssistantMessageParts,
+} from '../services/assistantMessageParts.js';
 import { buildPromptMessages, type PromptMessage } from '../services/promptBuilder.js';
 
-type ActiveLlmSettings = NonNullable<ReturnType<typeof getActiveLlmSettings>>;
+type ActiveLlmSettings = NonNullable<Awaited<ReturnType<typeof getActiveLlmSettings>>>;
 const APPROX_CHARS_PER_TOKEN = 4;
 
 class LlmRequestError extends Error {
@@ -38,9 +42,19 @@ class LlmRequestError extends Error {
 }
 
 class LlmAbortError extends Error {
-  constructor() {
+  constructor(
+    public readonly content = '',
+    public readonly firstTokenAt: Date | null = null,
+  ) {
     super('LLM request aborted');
   }
+}
+
+interface LlmReplyResult {
+  content: string;
+  firstTokenAt: Date | null;
+  completedAt: Date;
+  stopped: boolean;
 }
 
 function isPlainObject(value: unknown): value is object {
@@ -89,7 +103,7 @@ async function requestAssistantReply(
   llmSettings: ActiveLlmSettings,
   generationSettings: GenerationSettingsDto,
   messages: PromptMessage[],
-): Promise<string> {
+): Promise<LlmReplyResult> {
   const url = `${llmSettings.baseUrl.replace(/\/+$/, '')}/chat/completions`;
 
   let llmRes: Response;
@@ -132,7 +146,13 @@ async function requestAssistantReply(
     throw new LlmRequestError(502, 'LLM API returned invalid content');
   }
 
-  return content;
+  const completedAt = new Date();
+  return {
+    content,
+    firstTokenAt: completedAt,
+    completedAt,
+    stopped: false,
+  };
 }
 
 function isAbortError(err: unknown): boolean {
@@ -176,7 +196,7 @@ async function streamAssistantReply(args: {
   messages: PromptMessage[];
   signal: AbortSignal;
   onDelta: (content: string) => void;
-}): Promise<string> {
+}): Promise<LlmReplyResult> {
   const url = `${args.llmSettings.baseUrl.replace(/\/+$/, '')}/chat/completions`;
 
   let llmRes: Response;
@@ -216,6 +236,7 @@ async function streamAssistantReply(args: {
   let buffer = '';
   let content = '';
   let done = false;
+  let firstTokenAt: Date | null = null;
 
   try {
     while (!done) {
@@ -242,6 +263,7 @@ async function streamAssistantReply(args: {
           }
           const delta = extractStreamDelta(parsed);
           if (delta !== '') {
+            if (!firstTokenAt) firstTokenAt = new Date();
             content += delta;
             args.onDelta(delta);
           }
@@ -250,18 +272,23 @@ async function streamAssistantReply(args: {
       }
     }
   } catch (err) {
-    if (isAbortError(err)) throw new LlmAbortError();
+    if (isAbortError(err)) throw new LlmAbortError(content, firstTokenAt);
     throw err;
   } finally {
     reader.releaseLock();
   }
 
-  if (args.signal.aborted) throw new LlmAbortError();
+  if (args.signal.aborted) throw new LlmAbortError(content, firstTokenAt);
   if (!done) {
     throw new LlmRequestError(502, 'LLM API stream ended before completion');
   }
 
-  return content;
+  return {
+    content,
+    firstTokenAt,
+    completedAt: new Date(),
+    stopped: false,
+  };
 }
 
 function startNdjsonReply(reply: FastifyReply): void {
@@ -341,6 +368,156 @@ function toPromptHistory(
   });
 }
 
+function buildTiming(
+  startedAt: Date,
+  result: LlmReplyResult,
+): GenerationTimingDto {
+  const firstTokenMs = result.firstTokenAt
+    ? result.firstTokenAt.getTime() - startedAt.getTime()
+    : null;
+  const outputMs = result.firstTokenAt
+    ? result.completedAt.getTime() - result.firstTokenAt.getTime()
+    : null;
+  return {
+    startedAt: startedAt.toISOString(),
+    firstTokenAt: result.firstTokenAt?.toISOString() ?? null,
+    completedAt: result.completedAt.toISOString(),
+    firstTokenMs,
+    outputMs,
+    totalMs: result.completedAt.getTime() - startedAt.getTime(),
+    stopped: result.stopped,
+  };
+}
+
+function assistantDataFromContent(args: {
+  content: string;
+  timing: GenerationTimingDto;
+  promptDebugJson: string;
+}) {
+  const parts = splitAssistantMessageParts(args.content);
+  return {
+    content: args.content,
+    rawContent: args.content,
+    thinkingContent:
+      parts.thinkingBlocks.length > 0 ? parts.thinkingBlocks.join('\n\n') : null,
+    timingJson: JSON.stringify(args.timing),
+    promptDebugJson: args.promptDebugJson,
+  };
+}
+
+async function createAssistantMessageWithVariant(args: {
+  conversationId: string;
+  content: string;
+  timing: GenerationTimingDto;
+  promptDebugJson: string;
+  generationSettings: GenerationSettingsDto;
+}) {
+  const assistantData = assistantDataFromContent({
+    content: args.content,
+    timing: args.timing,
+    promptDebugJson: args.promptDebugJson,
+  });
+  const assistantMessage = await prisma.chatMessage.create({
+    data: {
+      conversationId: args.conversationId,
+      role: 'assistant',
+      ...assistantData,
+    },
+  });
+  const variant = await prisma.assistantMessageVariant.create({
+    data: {
+      messageId: assistantMessage.id,
+      content: assistantData.content,
+      rawContent: assistantData.rawContent,
+      thinkingContent: assistantData.thinkingContent,
+      timingJson: assistantData.timingJson,
+      generationSettingsJson: JSON.stringify(args.generationSettings),
+    },
+  });
+  return prisma.chatMessage.update({
+    where: { id: assistantMessage.id },
+    data: { selectedVariantId: variant.id },
+    include: {
+      variants: {
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      },
+    },
+  });
+}
+
+async function ensureCurrentAssistantVariant(
+  message: {
+    id: string;
+    content: string;
+    rawContent: string | null;
+    thinkingContent: string | null;
+    timingJson: string | null;
+    selectedVariantId: string | null;
+  },
+  generationSettings: GenerationSettingsDto,
+): Promise<string> {
+  if (message.selectedVariantId) return message.selectedVariantId;
+  const variant = await prisma.assistantMessageVariant.create({
+    data: {
+      messageId: message.id,
+      content: message.content,
+      rawContent: message.rawContent ?? message.content,
+      thinkingContent: message.thinkingContent,
+      timingJson: message.timingJson,
+      generationSettingsJson: JSON.stringify(generationSettings),
+    },
+  });
+  await prisma.chatMessage.update({
+    where: { id: message.id },
+    data: { selectedVariantId: variant.id },
+  });
+  return variant.id;
+}
+
+async function replaceAssistantWithVariant(args: {
+  message: {
+    id: string;
+    content: string;
+    rawContent: string | null;
+    thinkingContent: string | null;
+    timingJson: string | null;
+    selectedVariantId: string | null;
+  };
+  content: string;
+  timing: GenerationTimingDto;
+  promptDebugJson: string;
+  generationSettings: GenerationSettingsDto;
+}) {
+  await ensureCurrentAssistantVariant(args.message, args.generationSettings);
+  const assistantData = assistantDataFromContent({
+    content: args.content,
+    timing: args.timing,
+    promptDebugJson: args.promptDebugJson,
+  });
+  const variant = await prisma.assistantMessageVariant.create({
+    data: {
+      messageId: args.message.id,
+      content: assistantData.content,
+      rawContent: assistantData.rawContent,
+      thinkingContent: assistantData.thinkingContent,
+      timingJson: assistantData.timingJson,
+      generationSettingsJson: JSON.stringify(args.generationSettings),
+    },
+  });
+  return prisma.chatMessage.update({
+    where: { id: args.message.id },
+    data: {
+      ...assistantData,
+      selectedVariantId: variant.id,
+    },
+    include: {
+      variants: {
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      },
+    },
+  });
+}
+
 export async function chatRoutes(app: FastifyInstance) {
   app.post('/api/chat', async (req, reply) => {
     if (!isPlainObject(req.body)) {
@@ -369,7 +546,7 @@ export async function chatRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: 'character not found' });
     }
 
-    const llmSettings = getActiveLlmSettings();
+    const llmSettings = await getActiveLlmSettings();
     if (!llmSettings) {
       return reply
         .code(500)
@@ -394,6 +571,7 @@ export async function chatRoutes(app: FastifyInstance) {
       userMessage: message.trim(),
       promptSettings,
       promptPresetEntries,
+      generationSettings,
       limits: promptLimitsFromGenerationSettings(promptSettings, generationSettings),
     });
     const messages = prompt.messages;
@@ -401,38 +579,40 @@ export async function chatRoutes(app: FastifyInstance) {
       app.log.info({ prompt: prompt.debug }, 'prompt builder summary');
     }
 
-    let content: string;
+    let result: LlmReplyResult;
+    const startedAt = new Date();
     try {
-      content = await requestAssistantReply(app, llmSettings, generationSettings, messages);
+      result = await requestAssistantReply(app, llmSettings, generationSettings, messages);
     } catch (err) {
       return sendLlmError(reply, err);
     }
+    const timing = buildTiming(startedAt, result);
+    const promptDebugJson = JSON.stringify(prompt.debug.assembly);
 
-    const [userMessage, assistantMessage] = await prisma.$transaction([
-      prisma.chatMessage.create({
-        data: {
-          conversationId: conversation.id,
-          role: 'user',
-          content: message.trim(),
-        },
-      }),
-      prisma.chatMessage.create({
-        data: {
-          conversationId: conversation.id,
-          role: 'assistant',
-          content,
-        },
-      }),
-    ]);
+    const userMessage = await prisma.chatMessage.create({
+      data: {
+        conversationId: conversation.id,
+        role: 'user',
+        content: message.trim(),
+      },
+    });
+    const assistantMessage = await createAssistantMessageWithVariant({
+      conversationId: conversation.id,
+      content: result.content,
+      timing,
+      promptDebugJson,
+      generationSettings,
+    });
     const latestMessages = await getConversationMessages(conversation.id);
 
     const body: ChatResponse = {
-      reply: content,
+      reply: result.content,
       conversation: toConversationDto(conversation),
       userMessage: toChatMessageDto(userMessage),
       assistantMessage: toChatMessageDto(assistantMessage),
       messages: latestMessages.map(toChatMessageDto),
       activeWorldBookIds,
+      promptDebug: prompt.debug.assembly,
     };
     return reply.send(body);
   });
@@ -464,7 +644,7 @@ export async function chatRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: 'character not found' });
     }
 
-    const llmSettings = getActiveLlmSettings();
+    const llmSettings = await getActiveLlmSettings();
     if (!llmSettings) {
       return reply
         .code(500)
@@ -489,6 +669,7 @@ export async function chatRoutes(app: FastifyInstance) {
       userMessage: message.trim(),
       promptSettings,
       promptPresetEntries,
+      generationSettings,
       limits: promptLimitsFromGenerationSettings(promptSettings, generationSettings),
     });
     if (process.env.ROLEAGENT_PROMPT_DEBUG === '1') {
@@ -507,8 +688,10 @@ export async function chatRoutes(app: FastifyInstance) {
     };
     reply.raw.on('close', abortUpstream);
 
+    const startedAt = new Date();
+    const promptDebugJson = JSON.stringify(prompt.debug.assembly);
     try {
-      const content = await streamAssistantReply({
+      const result = await streamAssistantReply({
         app,
         llmSettings,
         generationSettings,
@@ -516,36 +699,73 @@ export async function chatRoutes(app: FastifyInstance) {
         signal: upstreamController.signal,
         onDelta: (delta) => writeNdjsonEvent(reply, { type: 'delta', content: delta }),
       });
+      const timing = buildTiming(startedAt, result);
       if (clientClosed || upstreamController.signal.aborted) return;
 
-      const [userMessage, assistantMessage] = await prisma.$transaction([
-        prisma.chatMessage.create({
-          data: {
-            conversationId: conversation.id,
-            role: 'user',
-            content: message.trim(),
-          },
-        }),
-        prisma.chatMessage.create({
-          data: {
-            conversationId: conversation.id,
-            role: 'assistant',
-            content,
-          },
-        }),
-      ]);
+      const userMessage = await prisma.chatMessage.create({
+        data: {
+          conversationId: conversation.id,
+          role: 'user',
+          content: message.trim(),
+        },
+      });
+      const assistantMessage = await createAssistantMessageWithVariant({
+        conversationId: conversation.id,
+        content: result.content,
+        timing,
+        promptDebugJson,
+        generationSettings,
+      });
       const latestMessages = await getConversationMessages(conversation.id);
 
       writeNdjsonEvent(reply, {
         type: 'done',
-        reply: content,
+        reply: result.content,
         conversation: toConversationDto(conversation),
         userMessage: toChatMessageDto(userMessage),
         assistantMessage: toChatMessageDto(assistantMessage),
         messages: latestMessages.map(toChatMessageDto),
         activeWorldBookIds,
+        promptDebug: prompt.debug.assembly,
       });
     } catch (err) {
+      if (err instanceof LlmAbortError && err.content.trim() !== '') {
+        const stoppedResult: LlmReplyResult = {
+          content: err.content,
+          firstTokenAt: err.firstTokenAt,
+          completedAt: new Date(),
+          stopped: true,
+        };
+        const timing = buildTiming(startedAt, stoppedResult);
+        const userMessage = await prisma.chatMessage.create({
+          data: {
+            conversationId: conversation.id,
+            role: 'user',
+            content: message.trim(),
+          },
+        });
+        const assistantMessage = await createAssistantMessageWithVariant({
+          conversationId: conversation.id,
+          content: err.content,
+          timing,
+          promptDebugJson,
+          generationSettings,
+        });
+        if (!clientClosed) {
+          const latestMessages = await getConversationMessages(conversation.id);
+          writeNdjsonEvent(reply, {
+            type: 'done',
+            reply: err.content,
+            conversation: toConversationDto(conversation),
+            userMessage: toChatMessageDto(userMessage),
+            assistantMessage: toChatMessageDto(assistantMessage),
+            messages: latestMessages.map(toChatMessageDto),
+            activeWorldBookIds,
+            promptDebug: prompt.debug.assembly,
+          });
+        }
+        return;
+      }
       if (!clientClosed && !isAbortError(err)) {
         const error =
           err instanceof LlmRequestError ? err.message : 'LLM API request failed';
@@ -568,7 +788,7 @@ export async function chatRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: 'conversation not found' });
     }
 
-    const llmSettings = getActiveLlmSettings();
+    const llmSettings = await getActiveLlmSettings();
     if (!llmSettings) {
       return reply
         .code(500)
@@ -606,15 +826,17 @@ export async function chatRoutes(app: FastifyInstance) {
       userMessage: previousMessage.content,
       promptSettings,
       promptPresetEntries,
+      generationSettings,
       limits: promptLimitsFromGenerationSettings(promptSettings, generationSettings),
     });
     if (process.env.ROLEAGENT_PROMPT_DEBUG === '1') {
       app.log.info({ prompt: prompt.debug }, 'prompt builder summary');
     }
 
-    let content: string;
+    let result: LlmReplyResult;
+    const startedAt = new Date();
     try {
-      content = await requestAssistantReply(
+      result = await requestAssistantReply(
         app,
         llmSettings,
         generationSettings,
@@ -623,19 +845,25 @@ export async function chatRoutes(app: FastifyInstance) {
     } catch (err) {
       return sendLlmError(reply, err);
     }
+    const timing = buildTiming(startedAt, result);
+    const promptDebugJson = JSON.stringify(prompt.debug.assembly);
 
-    const assistantMessage = await prisma.chatMessage.update({
-      where: { id: lastMessage.id },
-      data: { content },
+    const assistantMessage = await replaceAssistantWithVariant({
+      message: lastMessage,
+      content: result.content,
+      timing,
+      promptDebugJson,
+      generationSettings,
     });
     const latestMessages = await getConversationMessages(conversation.id);
 
     const body: RegenerateChatResponse = {
-      reply: content,
+      reply: result.content,
       conversation: toConversationDto(conversation),
       assistantMessage: toChatMessageDto(assistantMessage),
       messages: latestMessages.map(toChatMessageDto),
       activeWorldBookIds,
+      promptDebug: prompt.debug.assembly,
     };
     return reply.send(body);
   });
@@ -650,7 +878,7 @@ export async function chatRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: 'conversation not found' });
     }
 
-    const llmSettings = getActiveLlmSettings();
+    const llmSettings = await getActiveLlmSettings();
     if (!llmSettings) {
       return reply
         .code(500)
@@ -688,6 +916,7 @@ export async function chatRoutes(app: FastifyInstance) {
       userMessage: previousMessage.content,
       promptSettings,
       promptPresetEntries,
+      generationSettings,
       limits: promptLimitsFromGenerationSettings(promptSettings, generationSettings),
     });
     if (process.env.ROLEAGENT_PROMPT_DEBUG === '1') {
@@ -706,8 +935,10 @@ export async function chatRoutes(app: FastifyInstance) {
     };
     reply.raw.on('close', abortUpstream);
 
+    const startedAt = new Date();
+    const promptDebugJson = JSON.stringify(prompt.debug.assembly);
     try {
-      const content = await streamAssistantReply({
+      const result = await streamAssistantReply({
         app,
         llmSettings,
         generationSettings,
@@ -715,23 +946,57 @@ export async function chatRoutes(app: FastifyInstance) {
         signal: upstreamController.signal,
         onDelta: (delta) => writeNdjsonEvent(reply, { type: 'delta', content: delta }),
       });
+      const timing = buildTiming(startedAt, result);
       if (clientClosed || upstreamController.signal.aborted) return;
 
-      const assistantMessage = await prisma.chatMessage.update({
-        where: { id: lastMessage.id },
-        data: { content },
+      const assistantMessage = await replaceAssistantWithVariant({
+        message: lastMessage,
+        content: result.content,
+        timing,
+        promptDebugJson,
+        generationSettings,
       });
       const latestMessages = await getConversationMessages(conversation.id);
 
       writeNdjsonEvent(reply, {
         type: 'done',
-        reply: content,
+        reply: result.content,
         conversation: toConversationDto(conversation),
         assistantMessage: toChatMessageDto(assistantMessage),
         messages: latestMessages.map(toChatMessageDto),
         activeWorldBookIds,
+        promptDebug: prompt.debug.assembly,
       });
     } catch (err) {
+      if (err instanceof LlmAbortError && err.content.trim() !== '') {
+        const stoppedResult: LlmReplyResult = {
+          content: err.content,
+          firstTokenAt: err.firstTokenAt,
+          completedAt: new Date(),
+          stopped: true,
+        };
+        const timing = buildTiming(startedAt, stoppedResult);
+        const assistantMessage = await replaceAssistantWithVariant({
+          message: lastMessage,
+          content: err.content,
+          timing,
+          promptDebugJson,
+          generationSettings,
+        });
+        if (!clientClosed) {
+          const latestMessages = await getConversationMessages(conversation.id);
+          writeNdjsonEvent(reply, {
+            type: 'done',
+            reply: err.content,
+            conversation: toConversationDto(conversation),
+            assistantMessage: toChatMessageDto(assistantMessage),
+            messages: latestMessages.map(toChatMessageDto),
+            activeWorldBookIds,
+            promptDebug: prompt.debug.assembly,
+          });
+        }
+        return;
+      }
       if (!clientClosed && !isAbortError(err)) {
         const error =
           err instanceof LlmRequestError ? err.message : 'LLM API request failed';

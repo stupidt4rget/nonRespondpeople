@@ -33,7 +33,7 @@ function removeThinkingBlocks(
   let content = '';
   let cursor = 0;
   let hasOpenThinkingBlock = false;
-  const openPattern = /<think\b[^>]*>/gi;
+  const openPattern = /<think(?:ing)?\b[^>]*>/gi;
 
   while (cursor < value.length) {
     openPattern.lastIndex = cursor;
@@ -45,7 +45,7 @@ function removeThinkingBlocks(
 
     content += value.slice(cursor, open.index);
     const bodyStart = open.index + open[0].length;
-    const closePattern = /<\/think>/gi;
+    const closePattern = /<\/think(?:ing)?>/gi;
     closePattern.lastIndex = bodyStart;
     const close = closePattern.exec(value);
     if (!close || close.index === undefined) {
@@ -112,7 +112,7 @@ function unwrapContentBlock(
 }
 
 export function getThinkingBlockText(block: string): string {
-  const match = block.match(/^<think\b[^>]*>([\s\S]*?)<\/think>$/i);
+  const match = block.match(/^<think(?:ing)?\b[^>]*>([\s\S]*?)<\/think(?:ing)?>$/i);
   return (match ? match[1] ?? '' : block).trim();
 }
 

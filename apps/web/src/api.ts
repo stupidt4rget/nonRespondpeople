@@ -37,6 +37,7 @@
   CharacterConversationResponse,
   UpdateChatMessageRequest,
   UpdateConversationWorldBooksRequest,
+  SelectMessageVariantResponse,
 } from '@roleagent/shared';
 
 async function throwApiError(res: Response): Promise<never> {
@@ -151,7 +152,7 @@ export async function saveLlmSettings(
   body: LlmSettingsRequest,
 ): Promise<LlmSettingsStatusResponse> {
   const res = await fetch('/api/settings/llm', {
-    method: 'POST',
+    method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
@@ -159,6 +160,21 @@ export async function saveLlmSettings(
     return throwApiError(res);
   }
   return (await res.json()) as LlmSettingsStatusResponse;
+}
+
+export async function selectMessageVariant(
+  conversationId: string,
+  messageId: string,
+  variantId: string,
+): Promise<SelectMessageVariantResponse> {
+  const res = await fetch(
+    `/api/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/variants/${encodeURIComponent(variantId)}/select`,
+    { method: 'PATCH' },
+  );
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as SelectMessageVariantResponse;
 }
 
 export async function getPromptSettings(): Promise<PromptSettingsDto> {
