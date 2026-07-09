@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { appName } from '@roleagent/shared';
-import type { HealthResponse, CharacterDto, GenerationSettingsDto } from '@roleagent/shared';
-import { fetchCharacters, createCharacter, getGenerationSettings } from './api';
+import type {
+  HealthResponse,
+  CharacterDto,
+  GenerationSettingsDto,
+  UserPersonaDto,
+} from '@roleagent/shared';
+import {
+  fetchCharacters,
+  createCharacter,
+  fetchUserPersonas,
+  getGenerationSettings,
+} from './api';
 import { CharacterDetail } from './components/CharacterDetail';
 import { ChatPanel } from './components/ChatPanel';
 import { CharacterImport } from './components/CharacterImport';
@@ -11,6 +21,7 @@ import { PromptSettings } from './components/PromptSettings';
 import { PromptPresetsPanel } from './components/PromptPresetsPanel';
 import { CollapsibleSection } from './components/CollapsibleSection';
 import { WorldBookPanel } from './components/WorldBookPanel';
+import { UserPersonaPanel } from './components/UserPersonaPanel';
 import './App.css';
 
 type ConnectionState = 'checking' | 'connected' | 'error';
@@ -53,6 +64,8 @@ export function App() {
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>('chat');
   const [generationSettings, setGenerationSettings] =
     useState<GenerationSettingsDto | null>(null);
+  const [userPersonas, setUserPersonas] = useState<UserPersonaDto[]>([]);
+  const [userPersonasLoading, setUserPersonasLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -109,6 +122,23 @@ export function App() {
       cancelled = true;
     };
   }, []);
+
+  const loadUserPersonas = useCallback(async () => {
+    setUserPersonasLoading(true);
+    try {
+      const list = await fetchUserPersonas();
+      setUserPersonas(list);
+      setError(null);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUserPersonasLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadUserPersonas();
+  }, [loadUserPersonas]);
 
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
@@ -287,6 +317,20 @@ export function App() {
               />
             </CollapsibleSection>
 
+            <CollapsibleSection
+              title="用户设定"
+              eyebrow="Persona"
+              badge={<span className="count-pill">{userPersonas.length}</span>}
+              defaultOpen={false}
+            >
+              <UserPersonaPanel
+                personas={userPersonas}
+                loading={userPersonasLoading}
+                onPersonasChange={setUserPersonas}
+                onRefresh={loadUserPersonas}
+              />
+            </CollapsibleSection>
+
             <button
               className={`workspace-nav-button${
                 workspaceView === 'promptPresets' ? ' workspace-nav-button--active' : ''
@@ -361,6 +405,7 @@ export function App() {
             activeWorldBookCount={activeWorldBookIds.length}
             onConversationReady={handleConversationReady}
             streamEnabled={generationSettings?.streamEnabled ?? true}
+            userPersonas={userPersonas}
             detailSlot={
               <CharacterDetail
                 key={selected.id}

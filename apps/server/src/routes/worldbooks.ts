@@ -2,13 +2,20 @@ import type { FastifyInstance } from 'fastify';
 import type { WorldBook } from '@prisma/client';
 import type {
   CharacterWorldBooksResponse,
+  CreateWorldBookRequest,
   DeleteWorldBookResponse,
   ImportWorldBookRequest,
+  UpdateWorldBookRequest,
   WorldBookDto,
   WorldBooksResponse,
   UpdateCharacterWorldBooksRequest,
 } from '@roleagent/shared';
 import { prisma } from '../db/prisma.js';
+import {
+  normalizeWorldBookEntries,
+  parseWorldBookEntriesJson,
+  serializeWorldBookEntries,
+} from '../services/worldBookEntries.js';
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return (
@@ -28,6 +35,7 @@ function toWorldBookDto(worldBook: WorldBook): WorldBookDto {
     name: worldBook.name,
     description: worldBook.description,
     entriesJson: worldBook.entriesJson,
+    entries: parseWorldBookEntriesJson(worldBook.entriesJson),
     rawJson: worldBook.rawJson,
     createdAt: worldBook.createdAt.toISOString(),
     updatedAt: worldBook.updatedAt.toISOString(),
@@ -71,10 +79,39 @@ function getWorldBookDescription(raw: unknown): string | null {
 }
 
 function getEntriesJson(raw: unknown): string {
-  if (isPlainObject(raw) && raw.entries !== undefined) {
-    return JSON.stringify(raw.entries);
+  const rawEntries = isPlainObject(raw) && raw.entries !== undefined ? raw.entries : raw;
+  return JSON.stringify(normalizeWorldBookEntries(rawEntries));
+}
+
+function getExportEntries(value: string): unknown {
+  const normalized = parseWorldBookEntriesJson(value);
+  if (normalized.length > 0) return normalized;
+  return parseJson(value) ?? [];
+}
+
+function normalizeWorldBookUpdate(body: UpdateWorldBookRequest): {
+  name?: string;
+  description?: string | null;
+  entriesJson?: string;
+} {
+  const update: {
+    name?: string;
+    description?: string | null;
+    entriesJson?: string;
+  } = {};
+  if (body.name !== undefined) {
+    const name = strOrNull(body.name);
+    if (!name) throw new Error('name must be a non-empty string');
+    update.name = name;
   }
-  return JSON.stringify(raw);
+  if (body.description !== undefined) {
+    update.description = strOrNull(body.description);
+  }
+  if (body.entries !== undefined) {
+    if (!Array.isArray(body.entries)) throw new Error('entries must be an array');
+    update.entriesJson = serializeWorldBookEntries(body.entries);
+  }
+  return update;
 }
 
 async function assertWorldBooksExist(ids: string[]): Promise<void> {
@@ -157,6 +194,64 @@ export async function worldBookRoutes(app: FastifyInstance) {
     return reply.code(201).send(toWorldBookDto(created));
   });
 
+  app.post('/api/worldbooks', async (req, reply) => {
+    if (!isPlainObject(req.body)) {
+      return reply.code(400).send({ error: 'request body must be an object' });
+    }
+    const rawBody = req.body;
+    const name = typeof rawBody.name === 'string' ? rawBody.name.trim() : '';
+    if (name === '') {
+      return reply
+        .code(400)
+        .send({ error: 'name is required and must be a non-empty string' });
+    }
+
+    const requestBody: CreateWorldBookRequest = {
+      name,
+      description: strOrNull(rawBody.description),
+      entries: Array.isArray(rawBody.entries) ? rawBody.entries : [],
+    };
+
+    const created = await prisma.worldBook.create({
+      data: {
+        name: requestBody.name,
+        description: requestBody.description,
+        entriesJson: serializeWorldBookEntries(requestBody.entries ?? []),
+        rawJson: null,
+      },
+    });
+    return reply.code(201).send(toWorldBookDto(created));
+  });
+
+  app.put('/api/worldbooks/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!isPlainObject(req.body)) {
+      return reply.code(400).send({ error: 'request body must be an object' });
+    }
+    const found = await prisma.worldBook.findUnique({ where: { id } });
+    if (!found) {
+      return reply.code(404).send({ error: 'worldbook not found' });
+    }
+
+    let update: ReturnType<typeof normalizeWorldBookUpdate>;
+    try {
+      update = normalizeWorldBookUpdate(req.body as UpdateWorldBookRequest);
+    } catch (err) {
+      return reply
+        .code(400)
+        .send({ error: err instanceof Error ? err.message : String(err) });
+    }
+
+    const updated = await prisma.worldBook.update({
+      where: { id },
+      data: {
+        ...update,
+        rawJson: null,
+      },
+    });
+    return toWorldBookDto(updated);
+  });
+
   app.get('/api/worldbooks/:id/export', async (req, reply) => {
     const { id } = req.params as { id: string };
     const found = await prisma.worldBook.findUnique({ where: { id } });
@@ -169,7 +264,7 @@ export async function worldBookRoutes(app: FastifyInstance) {
       raw ?? {
         name: found.name,
         description: found.description,
-        entries: parseJson(found.entriesJson) ?? [],
+        entries: getExportEntries(found.entriesJson),
       },
     );
   });

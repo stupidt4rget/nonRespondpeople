@@ -3,7 +3,10 @@ import type {
   PromptAssemblyDebugDto,
   PromptPresetEntryDto,
   PromptSettingsDto,
+  WorldBookInsertionPosition,
+  WorldBookTriggerStrategy,
 } from '@roleagent/shared';
+import { parseWorldBookEntriesJson } from './worldBookEntries.js';
 
 export type PromptRole = 'system' | 'user' | 'assistant';
 
@@ -30,6 +33,12 @@ export interface PromptWorldBook {
   entriesJson: string;
 }
 
+export interface PromptUserPersona {
+  name: string;
+  description: string;
+  enabled: boolean;
+}
+
 export interface PromptBuilderInput {
   character: PromptCharacter;
   worldBooks: PromptWorldBook[];
@@ -38,6 +47,7 @@ export interface PromptBuilderInput {
   promptSettings?: PromptSettingsDto;
   promptPresetEntries?: PromptPresetEntryDto[];
   generationSettings?: GenerationSettingsDto;
+  activeUserPersona?: PromptUserPersona | null;
   visibleThinkingEnabled?: boolean;
   userName?: string;
   limits?: {
@@ -86,16 +96,23 @@ interface ParsedWorldBookEntry {
   worldBookName: string;
   label: string | null;
   content: string;
-  keys: string[];
-  constant: boolean;
+  primaryKeys: string[];
+  secondaryKeys: string[];
+  triggerStrategy: WorldBookTriggerStrategy;
+  insertionPosition: WorldBookInsertionPosition;
   order: number;
+  depth: number | null;
+  probability: number;
+  enabled: boolean;
   sourceIndex: number;
 }
 
 interface ActivatedWorldBookEntry extends ParsedWorldBookEntry {
   renderedContent: string;
   matchedKeywords: string[];
+  triggerReason: string;
   truncated: boolean;
+  isInjected: boolean;
 }
 
 interface PresetEntryMessagesResult {
@@ -354,92 +371,23 @@ function renderSillyTavernCompatPrompt(
   ).trim();
 }
 
-function parseJson(value: string): unknown {
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    return value;
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function stringArrayFromValue(value: unknown): string[] {
-  if (typeof value === 'string') return value.trim() ? [value.trim()] : [];
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is string => typeof item === 'string')
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function numberFromValue(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-
-function entryContent(entry: unknown): string {
-  if (typeof entry === 'string') return entry;
-  if (!isRecord(entry)) return JSON.stringify(entry);
-  const content = entry.content;
-  if (typeof content === 'string') return content;
-  return JSON.stringify(entry);
-}
-
-function entryLabel(entry: unknown): string | null {
-  if (!isRecord(entry)) return null;
-  const comment = entry.comment;
-  const name = entry.name;
-  if (typeof comment === 'string' && comment.trim() !== '') return comment.trim();
-  if (typeof name === 'string' && name.trim() !== '') return name.trim();
-  return null;
-}
-
-function entryKeys(entry: unknown): string[] {
-  if (!isRecord(entry)) return [];
-  return [
-    ...stringArrayFromValue(entry.keys),
-    ...stringArrayFromValue(entry.key),
-    ...stringArrayFromValue(entry.keywords),
-  ];
-}
-
-function entryConstant(entry: unknown): boolean {
-  return isRecord(entry) && entry.constant === true;
-}
-
-function entryOrder(entry: unknown): number {
-  if (!isRecord(entry)) return 0;
-  return (
-    numberFromValue(entry.insertion_order) ??
-    numberFromValue(entry.insertionOrder) ??
-    numberFromValue(entry.order) ??
-    0
-  );
-}
-
 function parseWorldBookEntries(worldBooks: PromptWorldBook[]): ParsedWorldBookEntry[] {
   const parsed: ParsedWorldBookEntry[] = [];
   let sourceIndex = 0;
   for (const worldBook of worldBooks) {
-    const raw = parseJson(worldBook.entriesJson);
-    const entries = Array.isArray(raw) ? raw : [raw];
-    for (const entry of entries) {
-      const content = normalizeOptionalText(entryContent(entry));
-      if (!content) continue;
+    for (const entry of parseWorldBookEntriesJson(worldBook.entriesJson)) {
       parsed.push({
         worldBookName: worldBook.name,
-        label: entryLabel(entry),
-        content,
-        keys: entryKeys(entry),
-        constant: entryConstant(entry),
-        order: entryOrder(entry),
+        label: entry.comment ?? entry.title,
+        content: entry.content,
+        primaryKeys: entry.primaryKeys,
+        secondaryKeys: entry.secondaryKeys,
+        triggerStrategy: entry.triggerStrategy,
+        insertionPosition: entry.insertionPosition,
+        order: entry.order,
+        depth: entry.depth,
+        probability: entry.probability,
+        enabled: entry.enabled,
         sourceIndex,
       });
       sourceIndex += 1;
@@ -448,7 +396,80 @@ function parseWorldBookEntries(worldBooks: PromptWorldBook[]): ParsedWorldBookEn
   return parsed;
 }
 
-function buildWorldBookBlock(args: {
+const WORLD_BOOK_POSITIONS: WorldBookInsertionPosition[] = [
+  'beforeCharacter',
+  'afterCharacter',
+  'beforeRecentMessages',
+  'afterRecentMessages',
+];
+
+function emptyPositionRecord<T>(value: T): Record<WorldBookInsertionPosition, T> {
+  return {
+    beforeCharacter: value,
+    afterCharacter: value,
+    beforeRecentMessages: value,
+    afterRecentMessages: value,
+  };
+}
+
+function scanTextForDepth(
+  history: Array<{ role: 'user' | 'assistant'; content: string }>,
+  userMessage: string,
+  depth: number,
+): string {
+  const recentHistory = depth > 0 ? history.slice(-depth) : [];
+  return [...recentHistory.map((message) => message.content), userMessage]
+    .join('\n')
+    .toLowerCase();
+}
+
+function evaluateWorldBookEntry(args: {
+  entry: ParsedWorldBookEntry;
+  history: Array<{ role: 'user' | 'assistant'; content: string }>;
+  userMessage: string;
+  defaultDepth: number;
+}): { matchedKeywords: string[]; triggered: boolean; triggerReason: string } {
+  if (!args.entry.enabled) {
+    return { matchedKeywords: [], triggered: false, triggerReason: 'disabled' };
+  }
+  const depth = args.entry.depth ?? args.defaultDepth;
+  const scanText = scanTextForDepth(args.history, args.userMessage, Math.max(0, depth));
+  const primaryMatches = args.entry.primaryKeys.filter((key) =>
+    scanText.includes(key.toLowerCase()),
+  );
+  const secondaryMatches = args.entry.secondaryKeys.filter((key) =>
+    scanText.includes(key.toLowerCase()),
+  );
+
+  let triggered = false;
+  let triggerReason = 'not matched';
+  if (args.entry.triggerStrategy === 'constant') {
+    triggered = true;
+    triggerReason = 'constant';
+  } else if (args.entry.triggerStrategy === 'keyword') {
+    triggered = primaryMatches.length > 0;
+    triggerReason = triggered ? 'primary keyword' : 'primary keyword not matched';
+  } else {
+    triggered = primaryMatches.length > 0 && secondaryMatches.length > 0;
+    triggerReason = triggered
+      ? 'selective primary + secondary keyword'
+      : 'selective keywords not matched';
+  }
+
+  if (triggered && args.entry.probability < 100) {
+    const probabilityHit = Math.random() * 100 < args.entry.probability;
+    triggered = probabilityHit;
+    if (!probabilityHit) triggerReason = 'probability skipped';
+  }
+
+  return {
+    matchedKeywords: [...primaryMatches, ...secondaryMatches],
+    triggered,
+    triggerReason,
+  };
+}
+
+function buildWorldBookBlocks(args: {
   character: PromptCharacter;
   userName: string;
   userPersona: string;
@@ -458,37 +479,37 @@ function buildWorldBookBlock(args: {
   maxChars: number;
   scanDepth: number;
 }): {
-  message: PromptMessage | null;
+  messagesByPosition: Record<WorldBookInsertionPosition, PromptMessage | null>;
   activatedCount: number;
   activatedEntries: ActivatedWorldBookEntry[];
   truncatedCount: number;
 } {
-  const scanDepth = Math.max(0, args.scanDepth);
-  const recentHistory = scanDepth > 0 ? args.history.slice(-scanDepth) : [];
-  const scanText = [
-    ...recentHistory.map((message) => message.content),
-    args.userMessage,
-  ].join('\n').toLowerCase();
-
   const activated = parseWorldBookEntries(args.worldBooks)
     .map((entry) => ({
       entry,
-      matchedKeywords: entry.keys.filter((key) => scanText.includes(key.toLowerCase())),
+      evaluation: evaluateWorldBookEntry({
+        entry,
+        history: args.history,
+        userMessage: args.userMessage,
+        defaultDepth: Math.max(0, args.scanDepth),
+      }),
     }))
-    .filter(({ entry, matchedKeywords }) => {
-      if (entry.constant) return true;
-      return matchedKeywords.length > 0;
-    })
+    .filter(({ evaluation }) => evaluation.triggered)
     .sort((a, b) => {
       if (b.entry.order !== a.entry.order) return b.entry.order - a.entry.order;
       return a.entry.sourceIndex - b.entry.sourceIndex;
     });
 
-  const chunks: string[] = [];
+  const chunksByPosition: Record<WorldBookInsertionPosition, string[]> = {
+    beforeCharacter: [],
+    afterCharacter: [],
+    beforeRecentMessages: [],
+    afterRecentMessages: [],
+  };
   let total = 0;
   const activatedEntries: ActivatedWorldBookEntry[] = [];
   let truncatedCount = 0;
-  for (const { entry, matchedKeywords } of activated) {
+  for (const { entry, evaluation } of activated) {
     const title = entry.label
       ? `Worldbook: ${entry.worldBookName} / ${entry.label}`
       : `Worldbook: ${entry.worldBookName}`;
@@ -500,42 +521,44 @@ function buildWorldBookBlock(args: {
     );
     const chunk = `${title}\n${rendered}`;
     if (total + chunk.length > args.maxChars) {
-      if (chunks.length === 0) {
-        chunks.push(clipText(chunk, args.maxChars));
+      if (activatedEntries.length === 0) {
+        chunksByPosition[entry.insertionPosition].push(clipText(chunk, args.maxChars));
         activatedEntries.push({
           ...entry,
           renderedContent: clipText(rendered, Math.max(0, args.maxChars - title.length - 1)),
-          matchedKeywords,
+          matchedKeywords: evaluation.matchedKeywords,
+          triggerReason: evaluation.triggerReason,
           truncated: true,
+          isInjected: true,
         });
       }
       truncatedCount += activated.length - activatedEntries.length;
       break;
     }
-    chunks.push(chunk);
+    chunksByPosition[entry.insertionPosition].push(chunk);
     activatedEntries.push({
       ...entry,
       renderedContent: rendered,
-      matchedKeywords,
+      matchedKeywords: evaluation.matchedKeywords,
+      triggerReason: evaluation.triggerReason,
       truncated: false,
+      isInjected: true,
     });
     total += chunk.length;
   }
 
-  if (chunks.length === 0) {
-    return {
-      message: null,
-      activatedCount: activated.length,
-      activatedEntries,
-      truncatedCount,
-    };
+  const messagesByPosition = emptyPositionRecord<PromptMessage | null>(null);
+  for (const position of WORLD_BOOK_POSITIONS) {
+    const chunks = chunksByPosition[position];
+    if (chunks.length > 0) {
+      messagesByPosition[position] = {
+        role: 'system',
+        content: `Relevant worldbook entries (${position}):\n\n${chunks.join('\n\n---\n\n')}`,
+      };
+    }
   }
-
   return {
-    message: {
-      role: 'system',
-      content: `Relevant worldbook entries:\n\n${chunks.join('\n\n---\n\n')}`,
-    },
+    messagesByPosition,
     activatedCount: activated.length,
     activatedEntries,
     truncatedCount,
@@ -770,12 +793,15 @@ function formatHistoryForMarker(
   return { content: selected.join('\n'), dropped };
 }
 
-function worldBookMarkerText(message: PromptMessage | null): string {
-  if (!message) return '';
+function worldBookMarkerText(
+  messagesByPosition: Record<WorldBookInsertionPosition, PromptMessage | null>,
+): string {
   const prefix = 'Relevant worldbook entries:\n\n';
-  return message.content.startsWith(prefix)
-    ? message.content.slice(prefix.length)
-    : message.content;
+  return WORLD_BOOK_POSITIONS
+    .map((position) => messagesByPosition[position]?.content ?? '')
+    .filter(Boolean)
+    .map((content) => (content.startsWith(prefix) ? content.slice(prefix.length) : content))
+    .join('\n\n---\n\n');
 }
 
 export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOutput {
@@ -802,7 +828,7 @@ export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOut
       DEFAULT_WORLDBOOK_SCAN_DEPTH,
   };
 
-  const worldBook = buildWorldBookBlock({
+  const worldBook = buildWorldBookBlocks({
     character: input.character,
     userName,
     userPersona,
@@ -826,7 +852,7 @@ export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOut
     userPersona,
     input.userMessage,
     markerHistory.content,
-    worldBookMarkerText(worldBook.message),
+    worldBookMarkerText(worldBook.messagesByPosition),
   );
   const characterSections: string[] =
     activePreset.messages.length > 0 ? ['activePromptPreset'] : ['base'];
@@ -860,6 +886,11 @@ export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOut
   if (personaMessage) {
     fixedMessages.push(personaMessage);
     characterSections.push('userPersona');
+  }
+
+  if (!activePreset.hasLoreMarker && worldBook.messagesByPosition.beforeCharacter) {
+    fixedMessages.push(worldBook.messagesByPosition.beforeCharacter);
+    characterSections.push('worldBook:beforeCharacter');
   }
 
   const rawSystemPrompt = normalizeOptionalText(input.character.systemPrompt);
@@ -909,7 +940,27 @@ export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOut
     characterSections.push('scenario');
   }
 
-  if (worldBook.message && !activePreset.hasLoreMarker) fixedMessages.push(worldBook.message);
+  const activePersonaDescription =
+    input.activeUserPersona?.enabled === true
+      ? normalizeOptionalText(input.activeUserPersona.description)
+      : null;
+  const activePersonaMessage = systemMessage(
+    activePersonaDescription
+      ? `[user persona]\n${userName}:\n${activePersonaDescription}`
+      : null,
+    input.character,
+    userName,
+    userPersona,
+  );
+  if (activePersonaMessage) {
+    fixedMessages.push(activePersonaMessage);
+    characterSections.push('User Persona');
+  }
+
+  if (!activePreset.hasLoreMarker && worldBook.messagesByPosition.afterCharacter) {
+    fixedMessages.push(worldBook.messagesByPosition.afterCharacter);
+    characterSections.push('worldBook:afterCharacter');
+  }
 
   const examples = buildExampleMessages(
     input.character,
@@ -960,6 +1011,8 @@ export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOut
   const fixedCost =
     countMessageChars(fixedMessages) +
     currentUserMessage.content.length +
+    (worldBook.messagesByPosition.beforeRecentMessages?.content.length ?? 0) +
+    (worldBook.messagesByPosition.afterRecentMessages?.content.length ?? 0) +
     (authorsNote?.content.length ?? 0) +
     (postHistory?.content.length ?? 0) +
     (visibleThinkingMessage?.content.length ?? 0) +
@@ -980,7 +1033,13 @@ export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOut
 
   const messages = [
     ...fixedMessages,
+    ...(!activePreset.hasLoreMarker && worldBook.messagesByPosition.beforeRecentMessages
+      ? [worldBook.messagesByPosition.beforeRecentMessages]
+      : []),
     ...trimmedHistory.messages,
+    ...(!activePreset.hasLoreMarker && worldBook.messagesByPosition.afterRecentMessages
+      ? [worldBook.messagesByPosition.afterRecentMessages]
+      : []),
     ...(authorsNote ? [authorsNote] : []),
     ...(postHistory ? [postHistory] : []),
     ...(visibleThinkingMessage ? [visibleThinkingMessage] : []),
@@ -1004,6 +1063,15 @@ export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOut
     estimatedTokens: estimatedTokens(message.content.length),
     preview: previewText(message.content),
   }));
+  const userPersonaDebug = activePersonaMessage
+    ? {
+        name: input.activeUserPersona?.name ?? 'User Persona',
+        role: activePersonaMessage.role,
+        chars: activePersonaMessage.content.length,
+        estimatedTokens: estimatedTokens(activePersonaMessage.content.length),
+        preview: previewText(activePersonaMessage.content),
+      }
+    : null;
   const recentHistoryDebug = trimmedHistory.messages.map((message, index) => ({
     name: `history-${index + 1}`,
     role: message.role,
@@ -1055,13 +1123,20 @@ export function buildPromptMessages(input: PromptBuilderInput): PromptBuilderOut
       messageOutline: buildMessageOutline(messages),
       assembly: {
         characterSections: characterDebugSections,
+        userPersona: userPersonaDebug,
         promptPresetEntries: presetDebugEntries,
         worldBookMatches: worldBook.activatedEntries.map((entry) => ({
           worldBookName: entry.worldBookName,
           entryName: entry.label,
-          keywords: entry.keys,
+          keywords: entry.primaryKeys,
           matchedKeywords: entry.matchedKeywords,
-          insertionPosition: 'system:lore',
+          triggerStrategy: entry.triggerStrategy,
+          triggerReason: entry.triggerReason,
+          insertionPosition: entry.insertionPosition,
+          order: entry.order,
+          depth: entry.depth ?? limits.worldBookScanDepth,
+          probability: entry.probability,
+          isInjected: entry.isInjected,
           chars: entry.renderedContent.length,
           estimatedTokens: estimatedTokens(entry.renderedContent.length),
           preview: previewText(entry.renderedContent),
