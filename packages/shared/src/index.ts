@@ -10,6 +10,64 @@ export interface DbHealthResponse {
   database: string;
 }
 
+export type ExtensionSourceType = 'zip' | 'git';
+
+export type ExtensionCompatibility = 'roleagent' | 'external';
+
+export interface ExtensionManifestDto {
+  id: string;
+  name: string;
+  version: string;
+  author?: string;
+  description?: string;
+  type: string;
+  compatibility: ExtensionCompatibility;
+  entry?: string;
+  js?: string;
+  css?: string;
+}
+
+export interface InstalledExtensionDto {
+  id: string;
+  displayName: string;
+  packageName: string;
+  version: string;
+  author: string | null;
+  description: string | null;
+  enabled: boolean;
+  sourceType: ExtensionSourceType;
+  sourceUrl: string | null;
+  installedPath: string;
+  compatibility?: ExtensionCompatibility;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExtensionsResponse {
+  extensions: InstalledExtensionDto[];
+}
+
+export interface InstallExtensionFromZipResponse {
+  extension: InstalledExtensionDto;
+}
+
+export interface InstallExtensionFromGitRequest {
+  gitUrl: string;
+}
+
+export interface InstallExtensionFromGitResponse {
+  extension: InstalledExtensionDto;
+}
+
+export interface UpdateExtensionRequest {
+  enabled: boolean;
+}
+
+export interface DeleteExtensionResponse {
+  ok: true;
+  id: string;
+}
+
 export interface CharacterDto {
   id: string;
   name: string;

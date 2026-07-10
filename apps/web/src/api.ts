@@ -47,6 +47,13 @@
   UpdateUserPersonaRequest,
   DeleteUserPersonaResponse,
   UpdateConversationUserPersonaRequest,
+  InstalledExtensionDto,
+  ExtensionsResponse,
+  InstallExtensionFromZipResponse,
+  InstallExtensionFromGitRequest,
+  InstallExtensionFromGitResponse,
+  UpdateExtensionRequest,
+  DeleteExtensionResponse,
 } from '@roleagent/shared';
 
 async function throwApiError(res: Response): Promise<never> {
@@ -135,6 +142,73 @@ export async function deleteCharacter(
     return throwApiError(res);
   }
   return (await res.json()) as DeleteCharacterResponse;
+}
+
+export async function fetchExtensions(): Promise<InstalledExtensionDto[]> {
+  const res = await fetch('/api/extensions');
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  const data = (await res.json()) as ExtensionsResponse;
+  return data.extensions;
+}
+
+export async function installExtensionZip(
+  file: File,
+): Promise<InstalledExtensionDto> {
+  const formData = new FormData();
+  formData.append('file', file, file.name);
+  const res = await fetch('/api/extensions/install-zip', {
+    method: 'POST',
+    body: formData,
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  const data = (await res.json()) as InstallExtensionFromZipResponse;
+  return data.extension;
+}
+
+export async function installExtensionGit(
+  body: InstallExtensionFromGitRequest,
+): Promise<InstalledExtensionDto> {
+  const res = await fetch('/api/extensions/install-git', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  const data = (await res.json()) as InstallExtensionFromGitResponse;
+  return data.extension;
+}
+
+export async function updateExtension(
+  id: string,
+  body: UpdateExtensionRequest,
+): Promise<InstalledExtensionDto> {
+  const res = await fetch(`/api/extensions/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as InstalledExtensionDto;
+}
+
+export async function deleteExtension(
+  id: string,
+): Promise<DeleteExtensionResponse> {
+  const res = await fetch(`/api/extensions/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as DeleteExtensionResponse;
 }
 
 export async function sendChat(body: ChatRequest): Promise<ChatResponse> {

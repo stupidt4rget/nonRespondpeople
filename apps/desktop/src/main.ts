@@ -26,11 +26,15 @@ function toPrismaSqliteUrl(filePath: string): string {
 }
 
 function getDatabasePath(): string {
-  const dataDir = path.join(app.getPath('userData'), 'data');
+  const dataDir = getDataDir();
   const fileName = desktopDev
     ? 'roleagent-tavern-dev.sqlite'
     : 'roleagent-tavern.sqlite';
   return path.join(dataDir, fileName);
+}
+
+function getDataDir(): string {
+  return path.join(app.getPath('userData'), 'data');
 }
 
 function getMigrationsRoot(): string {
@@ -125,6 +129,7 @@ async function startBackend(): Promise<string> {
   await mkdir(path.dirname(databasePath), { recursive: true });
   const databaseUrl = toPrismaSqliteUrl(databasePath);
   process.env.DATABASE_URL = databaseUrl;
+  process.env.ROLEAGENT_DATA_DIR = getDataDir();
 
   await initializeDatabase(databaseUrl);
 

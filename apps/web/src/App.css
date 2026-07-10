@@ -1889,3 +1889,223 @@ body {
   .character-worldbook-entry-stats,
   .character-worldbook-entry-actions { width: 100%; }
 }
+
+.extension-manager-page {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  height: 100%;
+  padding: 20px;
+  overflow: auto;
+  background: #f7f7f8;
+}
+
+.extension-manager-header,
+.extension-install-panel,
+.extension-list-section {
+  border: 1px solid #e3e3e7;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.extension-manager-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px;
+}
+
+.extension-manager-header h2,
+.extension-section-heading h3,
+.extension-card-title h4 {
+  margin: 0;
+  color: #202123;
+}
+
+.extension-manager-header h2 {
+  margin-top: 3px;
+  font-size: 1.4rem;
+}
+
+.extension-manager-header p:last-child,
+.extension-section-heading p,
+.extension-card-title p,
+.extension-empty-state p {
+  margin: 6px 0 0;
+  color: #6e6e73;
+  line-height: 1.45;
+}
+
+.extension-install-panel,
+.extension-list-section {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.extension-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.extension-section-heading h3 {
+  font-size: 1.02rem;
+}
+
+.extension-section-heading p {
+  font-size: 0.86rem;
+}
+
+.extension-install-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.extension-install-card {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  border: 1px solid #e3e3e7;
+  border-radius: 9px;
+  padding: 14px;
+  background: #fafafa;
+}
+
+.extension-install-card .button {
+  justify-self: start;
+}
+
+.extension-disabled-option,
+.extension-enabled-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #4f4f55;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.extension-disabled-option input,
+.extension-enabled-toggle input {
+  width: auto;
+}
+
+.extension-empty-state {
+  border: 1px dashed #c7c7cc;
+  border-radius: 9px;
+  padding: 28px 18px;
+  background: #fafafa;
+  color: #202123;
+  text-align: center;
+}
+
+.extension-card-list {
+  display: grid;
+  gap: 12px;
+}
+
+.extension-card {
+  display: grid;
+  gap: 14px;
+  border: 1px solid #e3e3e7;
+  border-radius: 10px;
+  padding: 14px;
+  background: #ffffff;
+}
+
+.extension-card-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+}
+
+.extension-enabled-toggle {
+  min-width: 88px;
+  border: 1px solid #dedee3;
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: #f7f7f8;
+}
+
+.extension-card-title {
+  min-width: 0;
+}
+
+.extension-card-title > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.extension-card-title h4 {
+  font-size: 1rem;
+}
+
+.extension-source-badge {
+  border: 1px solid #dedee3;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #f4f4f5;
+  color: #4f4f55;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.extension-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.extension-meta-grid > div {
+  min-width: 0;
+  border: 1px solid #ececef;
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: #fafafa;
+}
+
+.extension-meta-grid dt {
+  margin-bottom: 4px;
+  color: #8e8e93;
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.extension-meta-grid dd {
+  margin: 0;
+  color: #343541;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.extension-meta-grid .extension-meta-wide {
+  grid-column: span 2;
+}
+
+@media (max-width: 980px) {
+  .extension-install-grid,
+  .extension-meta-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .extension-meta-grid .extension-meta-wide {
+    grid-column: auto;
+  }
+
+  .extension-card-header {
+    grid-template-columns: 1fr;
+  }
+
+  .extension-enabled-toggle {
+    justify-self: start;
+  }
+}
