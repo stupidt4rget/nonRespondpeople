@@ -80,6 +80,22 @@ export interface InstalledExtensionDto {
   updatedAt: string;
 }
 
+export type JsonPrimitive = string | number | boolean | null;
+
+export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+
+export type ExtensionSettings = { [key: string]: JsonValue };
+
+export interface ExtensionSettingsResponse {
+  extensionId: string;
+  settings: ExtensionSettings;
+  updatedAt: string;
+}
+
+export interface UpdateExtensionSettingsRequest {
+  settings: ExtensionSettings;
+}
+
 export interface UpdateExtensionFeatureRequest {
   enabled: boolean;
 }
