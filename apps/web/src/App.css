@@ -1699,6 +1699,174 @@ body {
   font-weight: 800;
 }
 
+.character-worldbook-section {
+  overflow: hidden;
+  border: 1px solid #e3e3e7;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.character-worldbook-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.character-worldbook-summary::-webkit-details-marker { display: none; }
+.character-worldbook-summary > span:first-child { display: grid; gap: 3px; }
+.character-worldbook-summary strong { color: #202123; }
+.character-worldbook-summary small { color: #6e6e73; }
+
+.character-worldbook-section[open] > .character-worldbook-summary {
+  border-bottom: 1px solid #e5e5e5;
+  background: #fafafa;
+}
+
+.character-worldbook-body,
+.character-worldbook-card,
+.character-worldbook-entry-list { display: grid; gap: 12px; }
+.character-worldbook-body { padding: 14px; }
+
+.character-worldbook-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.character-worldbook-empty p { margin: 0; color: #6e6e73; }
+
+.character-worldbook-card {
+  border: 1px solid #e3e3e7;
+  border-radius: 10px;
+  padding: 14px;
+  background: #ffffff;
+}
+
+.character-worldbook-card-header,
+.character-worldbook-entry-heading,
+.character-worldbook-entry-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.character-worldbook-card-header h3,
+.character-worldbook-entry-heading h4,
+.character-worldbook-card-header p,
+.character-worldbook-entry-heading p { margin: 0; }
+
+.character-worldbook-card-header h3 {
+  margin-top: 2px;
+  color: #202123;
+  font-size: 1rem;
+}
+
+.character-worldbook-card-header p:last-child {
+  margin-top: 4px;
+  color: #6e6e73;
+  font-size: 0.82rem;
+}
+
+.unsaved-pill {
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: #fff6df;
+  color: #8a5a00;
+  font-size: 0.75rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.character-worldbook-meta-grid,
+.character-worldbook-entry-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.character-worldbook-entry-heading {
+  border-top: 1px solid #ececef;
+  padding-top: 12px;
+}
+
+.character-worldbook-entry {
+  overflow: hidden;
+  border: 1px solid #e3e3e7;
+  border-radius: 9px;
+  background: #ffffff;
+}
+
+.character-worldbook-entry--disabled { background: #f7f7f8; opacity: 0.78; }
+.character-worldbook-entry-row { padding: 10px; }
+
+.entry-enabled-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #4f4f55;
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.entry-enabled-toggle input { width: auto; }
+
+.character-worldbook-entry-title {
+  display: grid;
+  flex: 1 1 180px;
+  min-width: 0;
+  gap: 2px;
+}
+
+.character-worldbook-entry-title strong,
+.character-worldbook-entry-title small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.character-worldbook-entry-title strong { color: #202123; font-size: 0.88rem; }
+.character-worldbook-entry-title small { color: #6e6e73; font-size: 0.76rem; }
+
+.character-worldbook-entry-stats,
+.character-worldbook-entry-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.character-worldbook-entry-stats span {
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: #f0f0f2;
+  color: #5f5f65;
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.character-worldbook-entry-actions .button {
+  min-height: 30px;
+  padding: 0 9px;
+  font-size: 0.76rem;
+}
+
+.character-worldbook-entry-editor {
+  border-top: 1px solid #e5e5e5;
+  padding: 12px;
+  background: #fafafa;
+}
+
+.character-worldbook-wide-field { grid-column: 1 / -1; }
+
 @media (max-width: 980px) {
   .prompt-presets-layout {
     grid-template-columns: 1fr;
@@ -1707,4 +1875,17 @@ body {
   .preset-entry-preview {
     grid-template-columns: 1fr;
   }
+
+  .character-worldbook-meta-grid,
+  .character-worldbook-entry-editor { grid-template-columns: 1fr; }
+
+  .character-worldbook-wide-field { grid-column: auto; }
+
+  .character-worldbook-entry-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .character-worldbook-entry-stats,
+  .character-worldbook-entry-actions { width: 100%; }
 }

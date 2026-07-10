@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { WorldBook } from '@prisma/client';
 import type {
   CharacterWorldBooksResponse,
+  CreateCharacterWorldBookRequest,
   CreateWorldBookRequest,
   DeleteWorldBookResponse,
   ImportWorldBookRequest,
@@ -15,6 +16,7 @@ import {
   normalizeWorldBookEntries,
   parseWorldBookEntriesJson,
   serializeWorldBookEntries,
+  validateWorldBookEntriesInput,
 } from '../services/worldBookEntries.js';
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -49,6 +51,14 @@ function parseJson(value: string | null): unknown | null {
   } catch {
     return null;
   }
+}
+
+function parseWorldBookIdList(value: string | null): string[] {
+  const parsed = parseJson(value);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter(
+    (item): item is string => typeof item === 'string' && item.trim() !== '',
+  );
 }
 
 export function extractCharacterBookFromCard(card: unknown): unknown | null {
@@ -108,8 +118,9 @@ function normalizeWorldBookUpdate(body: UpdateWorldBookRequest): {
     update.description = strOrNull(body.description);
   }
   if (body.entries !== undefined) {
-    if (!Array.isArray(body.entries)) throw new Error('entries must be an array');
-    update.entriesJson = serializeWorldBookEntries(body.entries);
+    update.entriesJson = serializeWorldBookEntries(
+      validateWorldBookEntriesInput(body.entries),
+    );
   }
   return update;
 }
@@ -206,10 +217,20 @@ export async function worldBookRoutes(app: FastifyInstance) {
         .send({ error: 'name is required and must be a non-empty string' });
     }
 
+    let entries: CreateWorldBookRequest['entries'];
+    try {
+      entries = rawBody.entries === undefined
+        ? []
+        : validateWorldBookEntriesInput(rawBody.entries);
+    } catch (err) {
+      return reply
+        .code(400)
+        .send({ error: err instanceof Error ? err.message : String(err) });
+    }
     const requestBody: CreateWorldBookRequest = {
       name,
       description: strOrNull(rawBody.description),
-      entries: Array.isArray(rawBody.entries) ? rawBody.entries : [],
+      entries,
     };
 
     const created = await prisma.worldBook.create({
@@ -299,6 +320,84 @@ export async function worldBookRoutes(app: FastifyInstance) {
       worldBookIds: links.map((link) => link.worldBookId),
     };
     return body;
+  });
+
+  app.post('/api/characters/:id/worldbook', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!isPlainObject(req.body)) {
+      return reply.code(400).send({ error: 'request body must be an object' });
+    }
+    const body = req.body as CreateCharacterWorldBookRequest;
+    if (
+      body.name !== undefined &&
+      (typeof body.name !== 'string' || body.name.trim() === '')
+    ) {
+      return reply
+        .code(400)
+        .send({ error: 'name must be a non-empty string when provided' });
+    }
+    if (
+      body.description !== undefined &&
+      body.description !== null &&
+      typeof body.description !== 'string'
+    ) {
+      return reply
+        .code(400)
+        .send({ error: 'description must be a string or null' });
+    }
+
+    const character = await prisma.character.findUnique({
+      where: { id },
+      include: { worldBookLinks: { select: { id: true }, take: 1 } },
+    });
+    if (!character) {
+      return reply.code(404).send({ error: 'character not found' });
+    }
+    if (character.worldBookLinks.length > 0) {
+      return reply
+        .code(409)
+        .send({ error: 'character already has a bound worldbook' });
+    }
+
+    const created = await prisma.$transaction(async (tx) => {
+      const worldBook = await tx.worldBook.create({
+        data: {
+          name: body.name?.trim() ?? `${character.name} 世界书`,
+          description: strOrNull(body.description),
+          entriesJson: serializeWorldBookEntries([]),
+          rawJson: null,
+          characterLinks: {
+            create: {
+              characterId: id,
+              isDefault: true,
+            },
+          },
+        },
+      });
+
+      const conversations = await tx.conversation.findMany({
+        where: { characterId: id },
+        select: { id: true, activeWorldBookIdsJson: true },
+      });
+      await Promise.all(
+        conversations.map((conversation) =>
+          tx.conversation.update({
+            where: { id: conversation.id },
+            data: {
+              activeWorldBookIdsJson: JSON.stringify([
+                ...new Set([
+                  ...parseWorldBookIdList(conversation.activeWorldBookIdsJson),
+                  worldBook.id,
+                ]),
+              ]),
+            },
+          }),
+        ),
+      );
+      return worldBook;
+    });
+
+    return reply.code(201).send(toWorldBookDto(created));
   });
 
   app.put('/api/characters/:id/worldbooks', async (req, reply) => {

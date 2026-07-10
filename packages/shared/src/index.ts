@@ -443,6 +443,11 @@ export interface CreateWorldBookRequest {
   entries?: Partial<WorldBookEntryDto>[];
 }
 
+export interface CreateCharacterWorldBookRequest {
+  name?: string;
+  description?: string | null;
+}
+
 export interface UpdateWorldBookRequest {
   name?: string;
   description?: string | null;

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import type { CharacterDto } from '@roleagent/shared';
 import { updateCharacter, deleteCharacter, exportCharacterCard } from '../api';
+import { CharacterWorldBookEditor } from './CharacterWorldBookEditor';
 
 interface CharacterDetailProps {
   character: CharacterDto;
@@ -155,6 +156,8 @@ export function CharacterDetail({
         </div>
         {error !== null && <p className="notice notice--error">{error}</p>}
       </form>
+
+      <CharacterWorldBookEditor character={character} />
 
       <div className={`detail-grid${textExpanded ? ' detail-grid--expanded' : ''}`}>
         <section className="detail-card">

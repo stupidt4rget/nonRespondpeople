@@ -31,6 +31,7 @@
   WorldBookDto,
   WorldBooksResponse,
   ImportWorldBookRequest,
+  CreateCharacterWorldBookRequest,
   CreateWorldBookRequest,
   UpdateWorldBookRequest,
   DeleteWorldBookResponse,
@@ -469,6 +470,21 @@ export async function fetchCharacterWorldBooks(
     return throwApiError(res);
   }
   return (await res.json()) as CharacterWorldBooksResponse;
+}
+
+export async function createCharacterWorldBook(
+  id: string,
+  body: CreateCharacterWorldBookRequest = {},
+): Promise<WorldBookDto> {
+  const res = await fetch(`/api/characters/${encodeURIComponent(id)}/worldbook`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as WorldBookDto;
 }
 
 export async function updateCharacterWorldBooks(

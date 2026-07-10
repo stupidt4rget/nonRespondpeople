@@ -19,7 +19,7 @@ function trimText(value: unknown): string | null {
 function stringArrayFromValue(value: unknown): string[] {
   if (typeof value === 'string') {
     return value
-      .split(',')
+      .split(/[,\n\r，]+/)
       .map((item) => item.trim())
       .filter(Boolean);
   }
@@ -91,7 +91,7 @@ export function normalizeWorldBookEntries(rawEntries: unknown): WorldBookEntryDt
     .map((entry, index): WorldBookEntryDto | null => {
       const record = isRecord(entry) ? entry : null;
       const content = contentFromEntry(entry).trim();
-      if (!content) return null;
+      if (!content && !record) return null;
       const primaryKeys = record
         ? [
             ...stringArrayFromValue(record.primaryKeys),
@@ -151,4 +151,95 @@ export function serializeWorldBookEntries(
   entries: Array<Partial<WorldBookEntryDto>>,
 ): string {
   return JSON.stringify(normalizeWorldBookEntries(entries));
+}
+
+function assertOptionalString(
+  entry: Record<string, unknown>,
+  field: string,
+  index: number,
+): void {
+  const value = entry[field];
+  if (value !== undefined && typeof value !== 'string') {
+    throw new Error(`entries[${index}].${field} must be a string`);
+  }
+}
+
+function assertOptionalFiniteNumber(
+  entry: Record<string, unknown>,
+  field: string,
+  index: number,
+  nullable = false,
+): void {
+  const value = entry[field];
+  if (value === undefined || (nullable && value === null)) return;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`entries[${index}].${field} must be a finite number`);
+  }
+}
+
+export function validateWorldBookEntriesInput(
+  entries: unknown,
+): Array<Partial<WorldBookEntryDto>> {
+  if (!Array.isArray(entries)) {
+    throw new Error('entries must be an array');
+  }
+
+  entries.forEach((value, index) => {
+    if (!isRecord(value)) {
+      throw new Error(`entries[${index}] must be an object`);
+    }
+
+    if (value.enabled !== undefined && typeof value.enabled !== 'boolean') {
+      throw new Error(`entries[${index}].enabled must be a boolean`);
+    }
+    assertOptionalString(value, 'id', index);
+    assertOptionalString(value, 'title', index);
+    if (
+      value.comment !== undefined &&
+      value.comment !== null &&
+      typeof value.comment !== 'string'
+    ) {
+      throw new Error(`entries[${index}].comment must be a string or null`);
+    }
+    assertOptionalString(value, 'content', index);
+
+    for (const field of ['primaryKeys', 'secondaryKeys'] as const) {
+      const keys = value[field];
+      if (
+        keys !== undefined &&
+        (!Array.isArray(keys) || keys.some((key) => typeof key !== 'string'))
+      ) {
+        throw new Error(`entries[${index}].${field} must be an array of strings`);
+      }
+    }
+
+    if (
+      value.triggerStrategy !== undefined &&
+      value.triggerStrategy !== 'constant' &&
+      value.triggerStrategy !== 'keyword' &&
+      value.triggerStrategy !== 'selective'
+    ) {
+      throw new Error(
+        `entries[${index}].triggerStrategy must be constant, keyword, or selective`,
+      );
+    }
+
+    if (
+      value.insertionPosition !== undefined &&
+      value.insertionPosition !== 'beforeCharacter' &&
+      value.insertionPosition !== 'afterCharacter' &&
+      value.insertionPosition !== 'beforeRecentMessages' &&
+      value.insertionPosition !== 'afterRecentMessages'
+    ) {
+      throw new Error(
+        `entries[${index}].insertionPosition must be a supported position`,
+      );
+    }
+
+    assertOptionalFiniteNumber(value, 'order', index);
+    assertOptionalFiniteNumber(value, 'depth', index, true);
+    assertOptionalFiniteNumber(value, 'probability', index);
+  });
+
+  return entries as Array<Partial<WorldBookEntryDto>>;
 }
