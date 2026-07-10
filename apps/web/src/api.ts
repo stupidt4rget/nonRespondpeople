@@ -53,6 +53,7 @@
   InstallExtensionFromGitRequest,
   InstallExtensionFromGitResponse,
   UpdateExtensionRequest,
+  UpdateExtensionFeatureRequest,
   DeleteExtensionResponse,
 } from '@roleagent/shared';
 
@@ -193,6 +194,25 @@ export async function updateExtension(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as InstalledExtensionDto;
+}
+
+export async function updateExtensionFeature(
+  extensionId: string,
+  featureId: string,
+  body: UpdateExtensionFeatureRequest,
+): Promise<InstalledExtensionDto> {
+  const res = await fetch(
+    `/api/extensions/${encodeURIComponent(extensionId)}/features/${encodeURIComponent(featureId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  );
   if (!res.ok) {
     return throwApiError(res);
   }

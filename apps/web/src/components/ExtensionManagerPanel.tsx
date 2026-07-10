@@ -1,14 +1,22 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import type { InstalledExtensionDto } from '@roleagent/shared';
+import type { ExtensionFeatureDto, InstalledExtensionDto } from '@roleagent/shared';
 import {
   deleteExtension,
   fetchExtensions,
   installExtensionGit,
   installExtensionZip,
   updateExtension,
+  updateExtensionFeature,
 } from '../api';
+import { ExtensionFeatureList } from './ExtensionFeatureList';
+import { ExtensionRuntimePanel } from './ExtensionRuntimePanel';
 
 type InstallMode = 'zip' | 'git' | null;
+
+interface ActiveRuntime {
+  extensionId: string;
+  featureId: string;
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -25,6 +33,10 @@ function formatDate(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
+function featureKey(extensionId: string, featureId: string): string {
+  return `${extensionId}:${featureId}`;
+}
+
 export function ExtensionManagerPanel() {
   const [extensions, setExtensions] = useState<InstalledExtensionDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,7 +47,10 @@ export function ExtensionManagerPanel() {
   const [gitUrl, setGitUrl] = useState('');
   const [installing, setInstalling] = useState<InstallMode>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [updatingFeatureKey, setUpdatingFeatureKey] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [expandedExtensionIds, setExpandedExtensionIds] = useState<Record<string, boolean>>({});
+  const [activeRuntime, setActiveRuntime] = useState<ActiveRuntime | null>(null);
 
   const loadExtensions = useCallback(async () => {
     setLoading(true);
@@ -52,6 +67,15 @@ export function ExtensionManagerPanel() {
   useEffect(() => {
     void loadExtensions();
   }, [loadExtensions]);
+
+  useEffect(() => {
+    if (!activeRuntime) return;
+    const extension = extensions.find((item) => item.id === activeRuntime.extensionId);
+    const feature = extension?.features.find((item) => item.id === activeRuntime.featureId);
+    if (!extension?.enabled || !feature?.enabled || !feature?.runnable) {
+      setActiveRuntime(null);
+    }
+  }, [extensions, activeRuntime]);
 
   const handleZipInstall = async (event: FormEvent) => {
     event.preventDefault();
@@ -129,11 +153,60 @@ export function ExtensionManagerPanel() {
     }
   };
 
+  const handleFeatureEnabledChange = async (
+    extension: InstalledExtensionDto,
+    feature: ExtensionFeatureDto,
+    enabled: boolean,
+  ) => {
+    if (!extension.enabled) return;
+
+    setError(null);
+    setNotice(null);
+    const key = featureKey(extension.id, feature.id);
+    setUpdatingFeatureKey(key);
+    setExtensions((current) =>
+      current.map((item) => {
+        if (item.id !== extension.id) return item;
+        return {
+          ...item,
+          features: item.features.map((entry) =>
+            entry.id === feature.id ? { ...entry, enabled } : entry,
+          ),
+        };
+      }),
+    );
+
+    try {
+      const updated = await updateExtensionFeature(extension.id, feature.id, { enabled });
+      setExtensions((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      );
+    } catch (updateError: unknown) {
+      setExtensions((current) =>
+        current.map((item) => (item.id === extension.id ? extension : item)),
+      );
+      setError(`功能项状态保存失败：${errorMessage(updateError)}`);
+    } finally {
+      setUpdatingFeatureKey(null);
+    }
+  };
+
+  const handleRunFeature = (
+    extension: InstalledExtensionDto,
+    feature: ExtensionFeatureDto,
+  ) => {
+    if (!extension.enabled || !feature.enabled || !feature.runnable || !feature.runtimeUrl) return;
+    setActiveRuntime({ extensionId: extension.id, featureId: feature.id });
+  };
+
   const handleDelete = async (extension: InstalledExtensionDto) => {
     if (!window.confirm(`确认删除扩展“${extension.displayName}”及其安装文件？`)) return;
     setError(null);
     setNotice(null);
     setDeletingId(extension.id);
+    if (activeRuntime?.extensionId === extension.id) {
+      setActiveRuntime(null);
+    }
     try {
       await deleteExtension(extension.id);
       setExtensions((current) => current.filter((item) => item.id !== extension.id));
@@ -146,7 +219,20 @@ export function ExtensionManagerPanel() {
     }
   };
 
+  const toggleExpanded = (extensionId: string) => {
+    setExpandedExtensionIds((current) => ({
+      ...current,
+      [extensionId]: !current[extensionId],
+    }));
+  };
+
   const busy = installing !== null;
+  const runtimeExtension = activeRuntime
+    ? extensions.find((item) => item.id === activeRuntime.extensionId) ?? null
+    : null;
+  const runtimeFeature = runtimeExtension
+    ? runtimeExtension.features.find((item) => item.id === activeRuntime?.featureId) ?? null
+    : null;
 
   return (
     <section className="extension-manager-page" aria-labelledby="extension-manager-title">
@@ -155,7 +241,7 @@ export function ExtensionManagerPanel() {
           <p className="eyebrow">Extension Manager</p>
           <h2 id="extension-manager-title">扩展程序</h2>
           <p>
-            安装扩展包、管理启用状态并查看基础信息。V0.15 不会执行扩展代码。
+            安装扩展包、管理功能项开关，并在受控 iframe 沙箱中运行已启用的扩展功能。
           </p>
         </div>
         <span className="count-pill">{extensions.length} 个已安装</span>
@@ -220,11 +306,19 @@ export function ExtensionManagerPanel() {
       {error !== null && <p className="notice notice--error" role="alert">{error}</p>}
       {notice !== null && <p className="notice notice--success">{notice}</p>}
 
+      {runtimeExtension !== null && runtimeFeature !== null && (
+        <ExtensionRuntimePanel
+          extension={runtimeExtension}
+          feature={runtimeFeature}
+          onClose={() => setActiveRuntime(null)}
+        />
+      )}
+
       <section className="extension-list-section" aria-labelledby="installed-extensions-title">
         <div className="extension-section-heading">
           <div>
             <h3 id="installed-extensions-title">已安装扩展</h3>
-            <p>启用只保存状态，不会加载 JS、Node、Electron 或运行时 Hook。</p>
+            <p>扩展整体启用后，可单独管理功能项并在 iframe 沙箱中运行。</p>
           </div>
         </div>
 
@@ -241,8 +335,12 @@ export function ExtensionManagerPanel() {
             {extensions.map((extension) => {
               const updating = updatingId === extension.id;
               const deleting = deletingId === extension.id;
+              const expanded = expandedExtensionIds[extension.id] === true;
               return (
-                <article className="extension-card" key={extension.id}>
+                <article
+                  className={`extension-card${expanded ? ' extension-card--expanded' : ''}`}
+                  key={extension.id}
+                >
                   <div className="extension-card-header">
                     <label className="extension-enabled-toggle">
                       <input
@@ -268,14 +366,25 @@ export function ExtensionManagerPanel() {
                       </div>
                       <p>{extension.description ?? '暂无扩展说明。'}</p>
                     </div>
-                    <button
-                      className="button button--danger"
-                      type="button"
-                      disabled={deleting || updating || busy}
-                      onClick={() => void handleDelete(extension)}
-                    >
-                      {deleting ? '删除中...' : '删除'}
-                    </button>
+                    <div className="extension-card-actions">
+                      <button
+                        className="button button--secondary"
+                        type="button"
+                        disabled={deleting || updating || busy}
+                        onClick={() => toggleExpanded(extension.id)}
+                        aria-expanded={expanded}
+                      >
+                        {expanded ? '收起功能项' : '展开功能项'}
+                      </button>
+                      <button
+                        className="button button--danger"
+                        type="button"
+                        disabled={deleting || updating || busy}
+                        onClick={() => void handleDelete(extension)}
+                      >
+                        {deleting ? '删除中...' : '删除'}
+                      </button>
+                    </div>
                   </div>
 
                   <dl className="extension-meta-grid">
@@ -292,6 +401,20 @@ export function ExtensionManagerPanel() {
                       <dt>更新时间</dt><dd>{formatDate(extension.updatedAt)}</dd>
                     </div>
                   </dl>
+
+                  {expanded && (
+                    <div className="extension-card-features">
+                      <ExtensionFeatureList
+                        extension={extension}
+                        busy={busy || updating || deleting}
+                        updatingFeatureKey={updatingFeatureKey}
+                        onFeatureEnabledChange={(item, feature, enabled) => {
+                          void handleFeatureEnabledChange(item, feature, enabled);
+                        }}
+                        onRunFeature={handleRunFeature}
+                      />
+                    </div>
+                  )}
                 </article>
               );
             })}

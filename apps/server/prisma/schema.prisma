@@ -196,19 +196,20 @@ model PromptPresetEntry {
 }
 
 model InstalledExtension {
-  id            String   @id
-  displayName   String
-  packageName   String   @unique
-  version       String
-  author        String?
-  description   String?
-  enabled       Boolean  @default(false)
-  sourceType    String   @default("zip")
-  sourceUrl     String?
-  manifestJson  String
-  installedPath String
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                  String   @id
+  displayName         String
+  packageName         String   @unique
+  version             String
+  author              String?
+  description         String?
+  enabled             Boolean  @default(false)
+  sourceType          String   @default("zip")
+  sourceUrl           String?
+  manifestJson        String
+  featureSettingsJson String   @default("{}")
+  installedPath       String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   @@index([enabled])
   @@index([updatedAt])

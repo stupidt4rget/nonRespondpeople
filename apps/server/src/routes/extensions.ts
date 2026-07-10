@@ -4,18 +4,31 @@ import type {
   InstallExtensionFromGitRequest,
   InstallExtensionFromGitResponse,
   InstallExtensionFromZipResponse,
+  UpdateExtensionFeatureRequest,
   UpdateExtensionRequest,
 } from '@roleagent/shared';
 import path from 'node:path';
 import {
+  buildExtensionAssetsBaseHref,
+  ExtensionAssetsError,
+  getExtensionAssetContentType,
+  getExtensionRuntimeHeaders,
+  injectHtmlBaseHref,
+  readExtensionAssetFile,
+  resolveExtensionAssetPath,
+} from '../services/extensionAssets.js';
+import {
   deleteInstalledExtension,
   ExtensionManagerError,
+  getInstalledExtensionForAssets,
+  getInstalledExtensionRuntime,
   installExtensionFromGit,
   installExtensionFromZip,
   listInstalledExtensions,
   MAX_EXTENSION_MULTIPART_BYTES,
   MAX_EXTENSION_ZIP_BYTES,
   updateExtensionEnabled,
+  updateExtensionFeatureEnabled,
 } from '../services/extensionManager.js';
 
 interface UploadedZip {
@@ -142,11 +155,16 @@ async function sendExtensionError(
   reply: FastifyReply,
   error: unknown,
 ) {
-  if (error instanceof ExtensionManagerError) {
+  if (error instanceof ExtensionManagerError || error instanceof ExtensionAssetsError) {
     return reply.code(error.statusCode).send({ error: error.message });
   }
   app.log.error(error);
   return reply.code(500).send({ error: 'Extension operation failed.' });
+}
+
+function applyExtensionAssetHeaders(reply: FastifyReply): void {
+  reply.header('X-Content-Type-Options', 'nosniff');
+  reply.header('Cache-Control', 'no-store');
 }
 
 export async function extensionRoutes(app: FastifyInstance) {
@@ -161,6 +179,46 @@ export async function extensionRoutes(app: FastifyInstance) {
       extensions: await listInstalledExtensions(),
     };
     return body;
+  });
+
+  app.get('/api/extensions/:id/assets/*', async (request, reply) => {
+    try {
+      const params = request.params as { id: string; '*': string };
+      const assetPath = params['*'] ?? '';
+      if (assetPath.trim() === '') {
+        return reply.code(400).send({ error: 'Invalid extension asset path.' });
+      }
+      const { extensionRoot } = await getInstalledExtensionForAssets(params.id);
+      const resolvedPath = await resolveExtensionAssetPath(extensionRoot, assetPath);
+      const content = await readExtensionAssetFile(resolvedPath);
+      applyExtensionAssetHeaders(reply);
+      return reply
+        .type(getExtensionAssetContentType(resolvedPath))
+        .send(content);
+    } catch (error) {
+      return sendExtensionError(app, reply, error);
+    }
+  });
+
+  app.get('/api/extensions/:id/runtime/:featureId', async (request, reply) => {
+    try {
+      const { id, featureId } = request.params as { id: string; featureId: string };
+      const runtime = await getInstalledExtensionRuntime(id, featureId);
+      const resolvedPath = await resolveExtensionAssetPath(
+        runtime.extensionRoot,
+        runtime.entryRelativePath,
+      );
+      const content = await readExtensionAssetFile(resolvedPath);
+      const baseHref = buildExtensionAssetsBaseHref(runtime.extensionId, runtime.entryRelativePath);
+      const html = injectHtmlBaseHref(content.toString('utf8'), baseHref);
+      const headers = getExtensionRuntimeHeaders();
+      for (const [name, value] of Object.entries(headers)) {
+        reply.header(name, value);
+      }
+      return reply.type('text/html; charset=utf-8').send(html);
+    } catch (error) {
+      return sendExtensionError(app, reply, error);
+    }
   });
 
   app.post('/api/extensions/install-zip', async (request, reply) => {
@@ -206,6 +264,22 @@ export async function extensionRoutes(app: FastifyInstance) {
     }
     try {
       return await updateExtensionEnabled(id, body.enabled);
+    } catch (error) {
+      return sendExtensionError(app, reply, error);
+    }
+  });
+
+  app.patch('/api/extensions/:id/features/:featureId', async (request, reply) => {
+    const { id, featureId } = request.params as { id: string; featureId: string };
+    if (!isPlainObject(request.body)) {
+      return reply.code(400).send({ error: 'request body must be an object' });
+    }
+    const body = request.body as unknown as UpdateExtensionFeatureRequest;
+    if (typeof body.enabled !== 'boolean' || Object.keys(request.body).some((key) => key !== 'enabled')) {
+      return reply.code(400).send({ error: 'enabled must be the only field and must be boolean' });
+    }
+    try {
+      return await updateExtensionFeatureEnabled(id, featureId, body.enabled);
     } catch (error) {
       return sendExtensionError(app, reply, error);
     }

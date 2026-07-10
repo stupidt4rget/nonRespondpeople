@@ -2,6 +2,10 @@ import type { InstalledExtension } from '@prisma/client';
 import type {
   DeleteExtensionResponse,
   ExtensionCompatibility,
+  ExtensionFeatureCategory,
+  ExtensionFeatureDto,
+  ExtensionFeatureManifestDto,
+  ExtensionFeatureRuntime,
   ExtensionManifestDto,
   ExtensionSourceType,
   InstalledExtensionDto,
@@ -25,6 +29,7 @@ import {
 import { isIP } from 'node:net';
 import path from 'node:path';
 import { prisma } from '../db/prisma.js';
+import { isSafeFeatureEntryPath } from './extensionAssets.js';
 import { extractZipArchive, ZipArchiveError } from './zipArchive.js';
 
 export const MAX_EXTENSION_ZIP_BYTES = 20 * 1024 * 1024;
@@ -38,6 +43,17 @@ const MAX_GIT_CLONE_BYTES = 200 * 1024 * 1024;
 const MAX_GIT_URL_LENGTH = 2_048;
 const GIT_INSTALL_TIMEOUT_MS = 60_000;
 const EXTENSION_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const FEATURE_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const MAX_EXTENSION_FEATURES = 64;
+
+const VALID_FEATURE_CATEGORIES = new Set<ExtensionFeatureCategory>([
+  'render',
+  'script',
+  'tool',
+  'optimization',
+  'development',
+  'other',
+]);
 
 interface GitTreeEntry {
   archivePath: string;
@@ -133,18 +149,488 @@ function resolveInstalledDirectory(installedPath: string): string {
   return resolved;
 }
 
-function toInstalledExtensionDto(extension: InstalledExtension): InstalledExtensionDto {
-  let compatibility: ExtensionCompatibility | undefined;
+interface FeatureSettingsFile {
+  features: Record<string, { enabled: boolean }>;
+}
+
+function parseFeatureSettingsJson(raw: string): FeatureSettingsFile {
   try {
-    const stored = JSON.parse(extension.manifestJson) as { compatibility?: unknown };
-    if (stored.compatibility === 'roleagent' || stored.compatibility === 'external') {
-      compatibility = stored.compatibility;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isPlainObject(parsed) || !isPlainObject(parsed.features)) {
+      return { features: {} };
     }
+    const features: Record<string, { enabled: boolean }> = {};
+    for (const [featureId, value] of Object.entries(parsed.features)) {
+      if (!FEATURE_ID_PATTERN.test(featureId) || !isPlainObject(value)) continue;
+      if (typeof value.enabled !== 'boolean') continue;
+      features[featureId] = { enabled: value.enabled };
+    }
+    return { features };
   } catch {
-    // Ignore malformed stored manifest metadata.
+    return { features: {} };
+  }
+}
+
+function buildInitialFeatureSettingsJson(
+  manifestFeatures: ExtensionFeatureManifestDto[],
+): string {
+  const features: Record<string, { enabled: boolean }> = {};
+  for (const feature of manifestFeatures) {
+    features[feature.id] = { enabled: feature.enabledByDefault };
+  }
+  return JSON.stringify({ features });
+}
+
+function normalizeFeatureCategory(value: unknown): ExtensionFeatureCategory {
+  const category = optionalNonEmptyString(value);
+  if (category && VALID_FEATURE_CATEGORIES.has(category as ExtensionFeatureCategory)) {
+    return category as ExtensionFeatureCategory;
+  }
+  return 'other';
+}
+
+function normalizeFeatureRuntime(
+  value: unknown,
+  strict: boolean,
+): ExtensionFeatureRuntime | undefined {
+  const runtime = optionalNonEmptyString(value) ?? 'iframe';
+  if (runtime === 'iframe') return 'iframe';
+  if (strict) {
+    return extensionError(400, 'manifest.features[].runtime must be "iframe".');
+  }
+  return undefined;
+}
+
+function entryContainsUnsafeScheme(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return (
+    normalized.includes('://') ||
+    normalized.startsWith('data:') ||
+    normalized.startsWith('javascript:') ||
+    normalized.startsWith('file:')
+  );
+}
+
+function validateFeatureEntryPath(
+  fieldLabel: string,
+  value: string,
+  extensionRoot: string,
+  strict: boolean,
+): string | undefined {
+  if (entryContainsUnsafeScheme(value)) {
+    if (strict) {
+      return extensionError(400, `${fieldLabel} must not use remote, data, javascript, or file URLs.`);
+    }
+    return undefined;
+  }
+  if (value.includes('\\') || stringContainsUnsafePath(value)) {
+    if (strict) {
+      return extensionError(400, `${fieldLabel} must be a safe relative path.`);
+    }
+    return undefined;
+  }
+  const segments = value.split('/');
+  if (segments.some((segment) => segment === '' || segment === '.' || segment === '..')) {
+    if (strict) {
+      return extensionError(400, `${fieldLabel} must be a safe relative path.`);
+    }
+    return undefined;
+  }
+  const normalized = segments.join('/');
+  const resolved = path.resolve(extensionRoot, ...normalized.split('/'));
+  if (!isPathInside(extensionRoot, resolved)) {
+    if (strict) {
+      return extensionError(400, `${fieldLabel} points outside the extension directory.`);
+    }
+    return undefined;
+  }
+  return normalized;
+}
+
+function isLikelyIframeEntry(entry: string): boolean {
+  const lower = entry.toLowerCase();
+  return lower.endsWith('.html') || lower.endsWith('.htm');
+}
+
+function computeFeatureRunnable(
+  extensionEnabled: boolean,
+  featureEnabled: boolean,
+  runtime: ExtensionFeatureRuntime,
+  entry: string | undefined,
+  displayOnly = false,
+): boolean {
+  if (displayOnly) return false;
+  if (!extensionEnabled || !featureEnabled) return false;
+  if (runtime !== 'iframe') return false;
+  if (!entry) return false;
+  if (!isSafeFeatureEntryPath(entry)) return false;
+  if (!isLikelyIframeEntry(entry)) return false;
+  return true;
+}
+
+function buildFeatureRuntimeUrl(extensionId: string, featureId: string, runnable: boolean): string | null {
+  if (!runnable) return null;
+  return `/api/extensions/${encodeURIComponent(extensionId)}/runtime/${encodeURIComponent(featureId)}`;
+}
+
+function buildCompatibilityNote(
+  compatibility: ExtensionCompatibility,
+  feature: ExtensionFeatureManifestDto,
+  extensionEnabled: boolean,
+  featureEnabled: boolean,
+): string | null {
+  if (feature.displayOnly) {
+    if (feature.id === 'external-info') return EXTERNAL_INFO_NOTE;
+    if (feature.id.startsWith('external-style')) return EXTERNAL_STYLE_NOTE;
+    if (feature.id.startsWith('external-script')) {
+      if (feature.entry && !isSafeFeatureEntryPath(feature.entry)) {
+        return `${EXTERNAL_SCRIPT_NOTE} Entry path is not safe for runtime.`;
+      }
+      return EXTERNAL_SCRIPT_NOTE;
+    }
+    return EXTERNAL_INFO_NOTE;
   }
 
+  if (
+    computeFeatureRunnable(
+      extensionEnabled,
+      featureEnabled,
+      feature.runtime,
+      feature.entry,
+      feature.displayOnly,
+    )
+  ) {
+    return null;
+  }
+
+  if (!extensionEnabled) {
+    return 'Extension is disabled.';
+  }
+  if (!featureEnabled) {
+    return 'Feature is disabled.';
+  }
+  if (feature.runtime !== 'iframe') {
+    return 'Only iframe runtime is supported in V0.16.';
+  }
+  if (!feature.entry) {
+    if (compatibility === 'external') {
+      return 'External extension has no safe iframe entry; JS/CSS injection is not supported.';
+    }
+    return 'Feature has no entry path.';
+  }
+  if (!isSafeFeatureEntryPath(feature.entry)) {
+    return 'Feature entry path is not safe.';
+  }
+  if (!isLikelyIframeEntry(feature.entry)) {
+    if (compatibility === 'external') {
+      return 'External extension entry is not a safe iframe HTML entry.';
+    }
+    return 'Feature entry must be an HTML file for iframe runtime.';
+  }
+  return null;
+}
+
+function deriveDisplayNameFromAssetPath(assetPath: string, fallback: string): string {
+  const base = path.posix.basename(assetPath.replaceAll('\\', '/'));
+  if (base === '' || base === '.' || base === '..') return fallback;
+  return base;
+}
+
+function extractManifestPathList(rawManifest: Record<string, unknown>, field: 'js' | 'css'): string[] {
+  const value = rawManifest[field];
+  const paths: string[] = [];
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed !== '') paths.push(trimmed);
+    return paths;
+  }
+  if (!Array.isArray(value)) return paths;
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const trimmed = item.trim();
+    if (trimmed !== '') paths.push(trimmed);
+  }
+  return paths;
+}
+
+function hasSafeIframeEntry(entry: string | undefined): boolean {
+  if (!entry) return false;
+  return isSafeFeatureEntryPath(entry) && isLikelyIframeEntry(entry);
+}
+
+const EXTERNAL_SCRIPT_NOTE = 'External script detected, not fully compatible yet.';
+const EXTERNAL_STYLE_NOTE = 'External style detected, not fully compatible yet.';
+const EXTERNAL_INFO_NOTE = 'No RoleAgent features are available for this external extension.';
+
+function buildExternalScriptFeature(
+  assetPath: string,
+  index: number,
+  total: number,
+): ExtensionFeatureManifestDto {
+  const id = total === 1 ? 'external-script' : `external-script-${index}`;
   return {
+    id,
+    name: deriveDisplayNameFromAssetPath(assetPath, 'External Script'),
+    category: 'script',
+    entry: assetPath,
+    runtime: 'iframe',
+    enabledByDefault: false,
+    displayOnly: true,
+  };
+}
+
+function buildExternalStyleFeature(
+  assetPath: string,
+  index: number,
+  total: number,
+): ExtensionFeatureManifestDto {
+  const id = total === 1 ? 'external-style' : `external-style-${index}`;
+  return {
+    id,
+    name: deriveDisplayNameFromAssetPath(assetPath, 'External Style'),
+    category: 'render',
+    entry: assetPath,
+    runtime: 'iframe',
+    enabledByDefault: false,
+    displayOnly: true,
+  };
+}
+
+function synthesizeExternalDisplayFeatures(
+  jsPaths: string[],
+  cssPaths: string[],
+): ExtensionFeatureManifestDto[] {
+  const features: ExtensionFeatureManifestDto[] = [];
+  jsPaths.forEach((assetPath, index) => {
+    features.push(buildExternalScriptFeature(assetPath, index + 1, jsPaths.length));
+  });
+  cssPaths.forEach((assetPath, index) => {
+    features.push(buildExternalStyleFeature(assetPath, index + 1, cssPaths.length));
+  });
+  if (features.length === 0) {
+    features.push({
+      id: 'external-info',
+      name: 'External Extension',
+      description: 'This extension does not expose RoleAgent-compatible features.',
+      category: 'other',
+      runtime: 'iframe',
+      enabledByDefault: false,
+      displayOnly: true,
+    });
+  }
+  return features;
+}
+
+function resolveManifestFeatures(
+  manifest: ExtensionManifestDto,
+  options: {
+    rawParsed?: Record<string, unknown>;
+    jsPaths?: string[];
+    cssPaths?: string[];
+  } = {},
+): ExtensionFeatureManifestDto[] {
+  if (Array.isArray(manifest.features) && manifest.features.length > 0) {
+    return manifest.features;
+  }
+
+  const shouldSynthesizeMain =
+    Boolean(manifest.entry) &&
+    (manifest.compatibility !== 'external' || hasSafeIframeEntry(manifest.entry));
+  if (shouldSynthesizeMain && manifest.entry) {
+    return [
+      {
+        id: 'main',
+        name: manifest.name,
+        ...(manifest.description ? { description: manifest.description } : {}),
+        category: 'other',
+        entry: manifest.entry,
+        runtime: 'iframe',
+        enabledByDefault: false,
+      },
+    ];
+  }
+
+  if (manifest.compatibility === 'external') {
+    const jsPaths = [...(options.jsPaths ?? [])];
+    const cssPaths = [...(options.cssPaths ?? [])];
+    if (jsPaths.length === 0) {
+      if (options.rawParsed) jsPaths.push(...extractManifestPathList(options.rawParsed, 'js'));
+      if (manifest.js && !jsPaths.includes(manifest.js)) jsPaths.push(manifest.js);
+    }
+    if (cssPaths.length === 0) {
+      if (options.rawParsed) cssPaths.push(...extractManifestPathList(options.rawParsed, 'css'));
+      if (manifest.css && !cssPaths.includes(manifest.css)) cssPaths.push(manifest.css);
+    }
+    return synthesizeExternalDisplayFeatures(jsPaths, cssPaths);
+  }
+
+  return [];
+}
+
+async function resolveExternalAssetPaths(
+  extension: InstalledExtension,
+  manifest: ExtensionManifestDto,
+  rawParsed: Record<string, unknown> | null,
+): Promise<{ jsPaths: string[]; cssPaths: string[] }> {
+  let jsPaths = rawParsed ? extractManifestPathList(rawParsed, 'js') : [];
+  let cssPaths = rawParsed ? extractManifestPathList(rawParsed, 'css') : [];
+  if (manifest.js && !jsPaths.includes(manifest.js)) jsPaths.push(manifest.js);
+  if (manifest.css && !cssPaths.includes(manifest.css)) cssPaths.push(manifest.css);
+
+  if (manifest.compatibility !== 'external') {
+    return { jsPaths, cssPaths };
+  }
+
+  const hasRoleAgentFeatures = Array.isArray(manifest.features) && manifest.features.length > 0;
+  const hasSafeEntry = hasSafeIframeEntry(manifest.entry);
+  if (hasRoleAgentFeatures || hasSafeEntry || jsPaths.length > 0 || cssPaths.length > 0) {
+    return { jsPaths, cssPaths };
+  }
+
+  try {
+    const extensionRoot = resolveInstalledDirectory(extension.installedPath);
+    const diskRaw = JSON.parse(
+      await readFile(path.join(extensionRoot, 'manifest.json'), 'utf8'),
+    ) as unknown;
+    if (isPlainObject(diskRaw)) {
+      for (const assetPath of extractManifestPathList(diskRaw, 'js')) {
+        if (!jsPaths.includes(assetPath)) jsPaths.push(assetPath);
+      }
+      for (const assetPath of extractManifestPathList(diskRaw, 'css')) {
+        if (!cssPaths.includes(assetPath)) cssPaths.push(assetPath);
+      }
+    }
+  } catch {
+    // Use manifestJson-only paths when the on-disk manifest cannot be read.
+  }
+
+  return { jsPaths, cssPaths };
+}
+
+async function buildExtensionFeatureDtos(
+  extension: InstalledExtension,
+  manifest: ExtensionManifestDto,
+  rawParsed?: Record<string, unknown>,
+): Promise<ExtensionFeatureDto[]> {
+  const compatibility = manifest.compatibility;
+  const settings = parseFeatureSettingsJson(extension.featureSettingsJson);
+  const assetPaths = await resolveExternalAssetPaths(extension, manifest, rawParsed ?? null);
+  const manifestFeatures = resolveManifestFeatures(manifest, {
+    rawParsed,
+    jsPaths: assetPaths.jsPaths,
+    cssPaths: assetPaths.cssPaths,
+  });
+
+  return manifestFeatures.map((feature) => {
+    const stored = settings.features[feature.id];
+    const enabled = stored?.enabled ?? feature.enabledByDefault;
+    const entry = feature.entry ?? null;
+    const runnable = computeFeatureRunnable(
+      extension.enabled,
+      enabled,
+      feature.runtime,
+      feature.entry,
+      feature.displayOnly,
+    );
+    const compatibilityNote = buildCompatibilityNote(
+      compatibility,
+      feature,
+      extension.enabled,
+      enabled,
+    );
+
+    return {
+      id: feature.id,
+      name: feature.name,
+      description: feature.description ?? null,
+      category: feature.category,
+      entry,
+      runtime: feature.runtime,
+      enabled,
+      enabledByDefault: feature.enabledByDefault,
+      runnable,
+      runtimeUrl: buildFeatureRuntimeUrl(extension.id, feature.id, runnable),
+      compatibilityNote,
+    };
+  });
+}
+
+function parseStoredManifest(extension: InstalledExtension): {
+  manifest: ExtensionManifestDto;
+  rawParsed: Record<string, unknown> | null;
+} {
+  try {
+    const parsed = JSON.parse(extension.manifestJson) as unknown;
+    if (!isPlainObject(parsed)) {
+      return {
+        manifest: {
+          id: extension.id,
+          name: extension.displayName,
+          version: extension.version,
+          type: '',
+          compatibility: 'external',
+        },
+        rawParsed: null,
+      };
+    }
+    const compatibility: ExtensionCompatibility =
+      parsed.compatibility === 'roleagent' ? 'roleagent' : 'external';
+    const manifest: ExtensionManifestDto = {
+      id: extension.id,
+      name: extension.displayName,
+      version: extension.version,
+      type: typeof parsed.type === 'string' ? parsed.type : '',
+      compatibility,
+      ...(typeof parsed.description === 'string' ? { description: parsed.description } : {}),
+      ...(typeof parsed.entry === 'string' ? { entry: parsed.entry } : {}),
+      ...(typeof parsed.js === 'string' ? { js: parsed.js } : {}),
+      ...(typeof parsed.css === 'string' ? { css: parsed.css } : {}),
+    };
+    if (Array.isArray(parsed.features)) {
+      const features: ExtensionFeatureManifestDto[] = [];
+      for (const item of parsed.features) {
+        if (!isPlainObject(item)) continue;
+        const id = optionalNonEmptyString(item.id);
+        if (!id || !FEATURE_ID_PATTERN.test(id)) continue;
+        const runtime = optionalNonEmptyString(item.runtime);
+        if (runtime !== 'iframe') continue;
+        features.push({
+          id,
+          name: optionalNonEmptyString(item.name) ?? id,
+          ...(optionalNonEmptyString(item.description)
+            ? { description: optionalNonEmptyString(item.description) }
+            : {}),
+          category: normalizeFeatureCategory(item.category),
+          ...(optionalNonEmptyString(item.entry) ? { entry: optionalNonEmptyString(item.entry) } : {}),
+          runtime: 'iframe',
+          enabledByDefault: item.enabledByDefault === true,
+          ...(item.displayOnly === true ? { displayOnly: true } : {}),
+        });
+      }
+      if (features.length > 0) {
+        manifest.features = features;
+      }
+    }
+    return { manifest, rawParsed: parsed };
+  } catch {
+    return {
+      manifest: {
+        id: extension.id,
+        name: extension.displayName,
+        version: extension.version,
+        type: '',
+        compatibility: 'external',
+      },
+      rawParsed: null,
+    };
+  }
+}
+
+function toInstalledExtensionDto(extension: InstalledExtension): Promise<InstalledExtensionDto> {
+  const { manifest, rawParsed } = parseStoredManifest(extension);
+  const compatibility = manifest.compatibility;
+
+  return buildExtensionFeatureDtos(extension, manifest, rawParsed ?? undefined).then((features) => ({
     id: extension.id,
     displayName: extension.displayName,
     packageName: extension.packageName,
@@ -156,9 +642,10 @@ function toInstalledExtensionDto(extension: InstalledExtension): InstalledExtens
     sourceUrl: extension.sourceUrl,
     installedPath: extension.installedPath,
     ...(compatibility ? { compatibility } : {}),
+    features,
     createdAt: extension.createdAt.toISOString(),
     updatedAt: extension.updatedAt.toISOString(),
-  };
+  }));
 }
 
 function optionalNonEmptyString(value: unknown): string | undefined {
@@ -293,6 +780,128 @@ function validateManifestPathFields(
   return result;
 }
 
+interface NormalizeExtensionFeaturesContext {
+  id: string;
+  name: string;
+  description?: string;
+  entry?: string;
+}
+
+function parseSingleManifestFeature(
+  rawFeature: Record<string, unknown>,
+  extensionRoot: string,
+  strict: boolean,
+): ExtensionFeatureManifestDto | undefined {
+  const rawId = optionalNonEmptyString(rawFeature.id);
+  if (!rawId || !FEATURE_ID_PATTERN.test(rawId)) {
+    if (strict) {
+      return extensionError(
+        400,
+        'manifest.features[].id must match /^[a-z0-9][a-z0-9_-]{0,63}$/.',
+      );
+    }
+    return undefined;
+  }
+
+  const runtime = normalizeFeatureRuntime(rawFeature.runtime, strict);
+  if (!runtime) return undefined;
+
+  const description = optionalNonEmptyString(rawFeature.description);
+  if (description && description.length > 4_000) {
+    if (strict) return extensionError(400, 'manifest.features[].description is too long.');
+    return undefined;
+  }
+
+  const rawEntry = optionalNonEmptyString(rawFeature.entry);
+  let entry: string | undefined;
+  if (rawEntry) {
+    if (rawEntry.length > 512) {
+      if (strict) return extensionError(400, 'manifest.features[].entry is too long.');
+      return undefined;
+    }
+    entry = validateFeatureEntryPath(
+      `manifest.features[${rawId}].entry`,
+      rawEntry,
+      extensionRoot,
+      strict,
+    );
+  }
+
+  const name = optionalNonEmptyString(rawFeature.name) ?? rawId;
+  if (name.length > 200) {
+    if (strict) return extensionError(400, 'manifest.features[].name is too long.');
+    return undefined;
+  }
+
+  return {
+    id: rawId,
+    name,
+    ...(description ? { description } : {}),
+    category: normalizeFeatureCategory(rawFeature.category),
+    ...(entry ? { entry } : {}),
+    runtime,
+    enabledByDefault: rawFeature.enabledByDefault === true,
+  };
+}
+
+function normalizeExtensionFeatures(
+  rawManifest: Record<string, unknown>,
+  extensionRoot: string,
+  compatibility: ExtensionCompatibility,
+  context: NormalizeExtensionFeaturesContext,
+  topLevelEntry?: string,
+): ExtensionFeatureManifestDto[] {
+  const strict = compatibility === 'roleagent';
+  const rawFeatures = rawManifest.features;
+  const parsed: ExtensionFeatureManifestDto[] = [];
+  const seenIds = new Set<string>();
+
+  if (Array.isArray(rawFeatures)) {
+    if (rawFeatures.length > MAX_EXTENSION_FEATURES) {
+      if (strict) {
+        return extensionError(400, `manifest.features must contain at most ${MAX_EXTENSION_FEATURES} items.`);
+      }
+    }
+    for (const item of rawFeatures) {
+      if (!isPlainObject(item)) {
+        if (strict) return extensionError(400, 'manifest.features must contain only objects.');
+        continue;
+      }
+      const feature = parseSingleManifestFeature(item, extensionRoot, strict);
+      if (!feature) continue;
+      if (seenIds.has(feature.id)) {
+        if (strict) {
+          return extensionError(400, 'manifest.features contains duplicate feature ids.');
+        }
+        continue;
+      }
+      seenIds.add(feature.id);
+      parsed.push(feature);
+      if (parsed.length >= MAX_EXTENSION_FEATURES) break;
+    }
+  }
+
+  if (parsed.length === 0 && topLevelEntry) {
+    const entry = validateFeatureEntryPath(
+      'manifest.entry',
+      topLevelEntry,
+      extensionRoot,
+      strict,
+    );
+    parsed.push({
+      id: 'main',
+      name: context.name,
+      ...(context.description ? { description: context.description } : {}),
+      category: 'other',
+      ...(entry ? { entry } : {}),
+      runtime: 'iframe',
+      enabledByDefault: false,
+    });
+  }
+
+  return parsed;
+}
+
 export function normalizeExtensionManifest(
   rawManifest: Record<string, unknown>,
   options: NormalizeExtensionManifestOptions,
@@ -379,7 +988,19 @@ async function readAndValidateManifest(
 
   const normalized = normalizeExtensionManifest(parsed, options);
   const pathFields = validateManifestPathFields(parsed, extensionRoot);
-  return { ...normalized, ...pathFields };
+  const features = normalizeExtensionFeatures(
+    parsed,
+    extensionRoot,
+    normalized.compatibility,
+    {
+      id: normalized.id,
+      name: normalized.name,
+      ...(normalized.description ? { description: normalized.description } : {}),
+      ...(pathFields.entry ? { entry: pathFields.entry } : {}),
+    },
+    pathFields.entry,
+  );
+  return { ...normalized, ...pathFields, features };
 }
 
 async function findZipExtensionRoot(extractionRoot: string): Promise<string> {
@@ -492,6 +1113,7 @@ async function installValidatedExtension(
 
   try {
     await copyValidatedDirectory(stagedRoot, destination);
+    const manifestFeatures = manifest.features ?? [];
     const created = await prisma.installedExtension.create({
       data: {
         id: manifest.id,
@@ -504,10 +1126,11 @@ async function installValidatedExtension(
         sourceType,
         sourceUrl,
         manifestJson: JSON.stringify(manifest),
+        featureSettingsJson: buildInitialFeatureSettingsJson(manifestFeatures),
         installedPath,
       },
     });
-    return toInstalledExtensionDto(created);
+    return await toInstalledExtensionDto(created);
   } catch (error) {
     await rm(destination, { recursive: true, force: true });
     if (isPrismaUniqueConflict(error)) {
@@ -521,7 +1144,7 @@ export async function listInstalledExtensions(): Promise<InstalledExtensionDto[]
   const extensions = await prisma.installedExtension.findMany({
     orderBy: { updatedAt: 'desc' },
   });
-  return extensions.map(toInstalledExtensionDto);
+  return Promise.all(extensions.map((extension) => toInstalledExtensionDto(extension)));
 }
 
 export async function installExtensionFromZip(zipBuffer: Buffer): Promise<InstalledExtensionDto> {
@@ -1061,6 +1684,63 @@ export async function installExtensionFromGit(gitUrlValue: unknown): Promise<Ins
   }
 }
 
+export interface ExtensionRuntimeContext {
+  extensionId: string;
+  featureId: string;
+  extensionRoot: string;
+  entryRelativePath: string;
+}
+
+export async function getInstalledExtensionForAssets(
+  extensionId: string,
+): Promise<{ extensionRoot: string }> {
+  const existing = await prisma.installedExtension.findUnique({ where: { id: extensionId } });
+  if (!existing) return extensionError(404, 'Extension not found.');
+  if (!existing.enabled) return extensionError(403, 'Extension is disabled.');
+  return { extensionRoot: resolveInstalledDirectory(existing.installedPath) };
+}
+
+export async function getInstalledExtensionRuntime(
+  extensionId: string,
+  featureId: string,
+): Promise<ExtensionRuntimeContext> {
+  const existing = await prisma.installedExtension.findUnique({ where: { id: extensionId } });
+  if (!existing) return extensionError(404, 'Extension not found.');
+  if (!existing.enabled) return extensionError(403, 'Extension is disabled.');
+
+  const { manifest, rawParsed } = parseStoredManifest(existing);
+  const assetPaths = await resolveExternalAssetPaths(existing, manifest, rawParsed);
+  const manifestFeatures = resolveManifestFeatures(manifest, {
+    ...(rawParsed ? { rawParsed } : {}),
+    jsPaths: assetPaths.jsPaths,
+    cssPaths: assetPaths.cssPaths,
+  });
+  const feature = manifestFeatures.find((item) => item.id === featureId);
+  if (!feature) return extensionError(404, 'Extension feature not found.');
+
+  const settings = parseFeatureSettingsJson(existing.featureSettingsJson);
+  const featureEnabled = settings.features[featureId]?.enabled ?? feature.enabledByDefault;
+  if (!featureEnabled) return extensionError(403, 'Extension feature is disabled.');
+  if (feature.displayOnly) return extensionError(403, 'Extension feature is not runnable.');
+  if (feature.runtime !== 'iframe') {
+    return extensionError(403, 'Extension feature is not runnable.');
+  }
+  if (!feature.entry) return extensionError(403, 'Extension feature is not runnable.');
+  if (!isSafeFeatureEntryPath(feature.entry)) {
+    return extensionError(400, 'Invalid extension asset path.');
+  }
+  if (!isLikelyIframeEntry(feature.entry)) {
+    return extensionError(403, 'Extension feature is not runnable.');
+  }
+
+  return {
+    extensionId: existing.id,
+    featureId: feature.id,
+    extensionRoot: resolveInstalledDirectory(existing.installedPath),
+    entryRelativePath: feature.entry,
+  };
+}
+
 export async function updateExtensionEnabled(
   id: string,
   enabled: boolean,
@@ -1071,7 +1751,38 @@ export async function updateExtensionEnabled(
     where: { id },
     data: { enabled },
   });
-  return toInstalledExtensionDto(updated);
+  return await toInstalledExtensionDto(updated);
+}
+
+export async function updateExtensionFeatureEnabled(
+  extensionId: string,
+  featureId: string,
+  enabled: boolean,
+): Promise<InstalledExtensionDto> {
+  const existing = await prisma.installedExtension.findUnique({ where: { id: extensionId } });
+  if (!existing) return extensionError(404, 'Extension not found.');
+
+  const { manifest, rawParsed } = parseStoredManifest(existing);
+  const assetPaths = await resolveExternalAssetPaths(existing, manifest, rawParsed);
+  const manifestFeatures = resolveManifestFeatures(manifest, {
+    ...(rawParsed ? { rawParsed } : {}),
+    jsPaths: assetPaths.jsPaths,
+    cssPaths: assetPaths.cssPaths,
+  });
+  if (!manifestFeatures.some((feature) => feature.id === featureId)) {
+    return extensionError(404, 'Extension feature not found.');
+  }
+
+  const settings = parseFeatureSettingsJson(existing.featureSettingsJson);
+  settings.features[featureId] = { enabled };
+
+  const updated = await prisma.installedExtension.update({
+    where: { id: extensionId },
+    data: {
+      featureSettingsJson: JSON.stringify(settings),
+    },
+  });
+  return await toInstalledExtensionDto(updated);
 }
 
 export async function deleteInstalledExtension(id: string): Promise<DeleteExtensionResponse> {

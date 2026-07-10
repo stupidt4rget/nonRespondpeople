@@ -14,6 +14,41 @@ export type ExtensionSourceType = 'zip' | 'git';
 
 export type ExtensionCompatibility = 'roleagent' | 'external';
 
+export type ExtensionFeatureCategory =
+  | 'render'
+  | 'script'
+  | 'tool'
+  | 'optimization'
+  | 'development'
+  | 'other';
+
+export type ExtensionFeatureRuntime = 'iframe';
+
+export interface ExtensionFeatureManifestDto {
+  id: string;
+  name: string;
+  description?: string;
+  category: ExtensionFeatureCategory;
+  entry?: string;
+  runtime: ExtensionFeatureRuntime;
+  enabledByDefault: boolean;
+  displayOnly?: boolean;
+}
+
+export interface ExtensionFeatureDto {
+  id: string;
+  name: string;
+  description: string | null;
+  category: ExtensionFeatureCategory;
+  entry: string | null;
+  runtime: ExtensionFeatureRuntime;
+  enabled: boolean;
+  enabledByDefault: boolean;
+  runnable: boolean;
+  runtimeUrl: string | null;
+  compatibilityNote: string | null;
+}
+
 export interface ExtensionManifestDto {
   id: string;
   name: string;
@@ -25,6 +60,7 @@ export interface ExtensionManifestDto {
   entry?: string;
   js?: string;
   css?: string;
+  features?: ExtensionFeatureManifestDto[];
 }
 
 export interface InstalledExtensionDto {
@@ -39,8 +75,13 @@ export interface InstalledExtensionDto {
   sourceUrl: string | null;
   installedPath: string;
   compatibility?: ExtensionCompatibility;
+  features: ExtensionFeatureDto[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface UpdateExtensionFeatureRequest {
+  enabled: boolean;
 }
 
 export interface ExtensionsResponse {
