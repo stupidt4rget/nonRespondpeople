@@ -242,6 +242,10 @@ export async function extensionRoutes(app: FastifyInstance) {
       const resolvedPath = await resolveExtensionAssetPath(extensionRoot, assetPath);
       const content = await readExtensionAssetFile(resolvedPath);
       applyExtensionAssetHeaders(reply);
+      if (request.headers.origin === 'null') {
+        reply.header('Access-Control-Allow-Origin', 'null');
+        reply.header('Vary', 'Origin');
+      }
       return reply
         .type(getExtensionAssetContentType(resolvedPath))
         .send(content);

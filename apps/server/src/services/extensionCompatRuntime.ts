@@ -57,13 +57,14 @@ function readManifestAssetEntry(
   }
 
   const entry = value.trim();
-  const requiredExtension = field === 'js' ? '.js' : '.css';
+  const allowedExtensions = field === 'js' ? ['.js', '.mjs'] : ['.css'];
+  const entryExt = path.posix.extname(entry).toLowerCase();
   if (
     entry.length > MAX_MANIFEST_ASSET_PATH_LENGTH ||
     !isSafeFeatureEntryPath(entry) ||
-    path.posix.extname(entry).toLowerCase() !== requiredExtension
+    !allowedExtensions.includes(entryExt)
   ) {
-    return compatError(409, `Extension manifest.${field} is not a safe ${requiredExtension} entry.`);
+    return compatError(409, `Extension manifest.${field} is not a safe ${allowedExtensions.join(' or ')} entry.`);
   }
   return entry;
 }

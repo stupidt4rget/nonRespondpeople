@@ -7,6 +7,7 @@ const ALLOWED_ASSET_EXTENSIONS = new Set([
   '.html',
   '.htm',
   '.js',
+  '.mjs',
   '.css',
   '.png',
   '.jpg',
@@ -169,7 +170,7 @@ export async function resolveExtensionAssetPath(
 export function getExtensionAssetContentType(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.html' || ext === '.htm') return 'text/html; charset=utf-8';
-  if (ext === '.js') return 'text/javascript; charset=utf-8';
+  if (ext === '.js' || ext === '.mjs') return 'text/javascript; charset=utf-8';
   if (ext === '.css') return 'text/css; charset=utf-8';
   if (ext === '.json') return 'application/json; charset=utf-8';
   if (ext === '.svg') return 'image/svg+xml';
