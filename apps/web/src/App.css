@@ -2091,21 +2091,282 @@ body {
   grid-column: span 2;
 }
 
+.extension-card--expanded {
+  border-color: #c7c7cc;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.06);
+}
+
+.extension-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.extension-card-features {
+  border-top: 1px solid #e5e5e5;
+  padding-top: 14px;
+}
+
+.extension-feature-list {
+  display: grid;
+  gap: 14px;
+}
+
+.extension-feature-empty,
+.extension-feature-disabled-notice {
+  margin: 0;
+}
+
+.extension-feature-disabled-notice {
+  border: 1px solid #dedee3;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #f7f7f8;
+  color: #4f4f55;
+  font-size: 0.86rem;
+}
+
+.extension-feature-category {
+  display: grid;
+  gap: 10px;
+}
+
+.extension-feature-category-title {
+  margin: 0;
+  color: #202123;
+  font-size: 0.9rem;
+  font-weight: 850;
+}
+
+.extension-feature-category-rows {
+  display: grid;
+  gap: 10px;
+}
+
+.extension-feature-row {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #e3e3e7;
+  border-radius: 9px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.extension-feature-row--runnable {
+  border-color: #d7d7dc;
+}
+
+.extension-feature-row--blocked {
+  background: #fafafa;
+  opacity: 0.92;
+}
+
+.extension-feature-row-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.extension-feature-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 88px;
+  border: 1px solid #dedee3;
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: #f7f7f8;
+  color: #4f4f55;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.extension-feature-toggle input {
+  width: auto;
+}
+
+.extension-feature-summary {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.extension-feature-title-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.extension-feature-title-line strong {
+  color: #202123;
+  font-size: 0.95rem;
+}
+
+.extension-feature-summary p {
+  margin: 0;
+  color: #6e6e73;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.extension-feature-blocked-reason {
+  color: #8a5a00 !important;
+  font-weight: 700;
+}
+
+.extension-feature-status {
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.extension-feature-status--runnable {
+  border: 1px solid #c7e7df;
+  background: #effcf8;
+  color: #0f766e;
+}
+
+.extension-feature-status--blocked {
+  border: 1px solid #dedee3;
+  background: #f4f4f5;
+  color: #6e6e73;
+}
+
+.extension-feature-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.extension-feature-actions .button {
+  min-height: 34px;
+  padding: 0 11px;
+  font-size: 0.8rem;
+}
+
+.extension-feature-details {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  border-top: 1px solid #ececef;
+  padding-top: 12px;
+}
+
+.extension-feature-details > div {
+  min-width: 0;
+  border: 1px solid #ececef;
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: #fafafa;
+}
+
+.extension-feature-details dt {
+  margin-bottom: 4px;
+  color: #8e8e93;
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.extension-feature-details dd {
+  margin: 0;
+  color: #343541;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.extension-feature-details-wide {
+  grid-column: 1 / -1;
+}
+
+.extension-runtime-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #e3e3e7;
+  border-radius: 10px;
+  padding: 16px;
+  background: #ffffff;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.08);
+}
+
+.extension-runtime-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.extension-runtime-header h3 {
+  margin: 4px 0 0;
+  color: #202123;
+  font-size: 1.05rem;
+}
+
+.extension-runtime-status {
+  margin: 6px 0 0;
+  color: #6e6e73;
+  font-size: 0.84rem;
+}
+
+.extension-runtime-toast {
+  margin: 0;
+}
+
+.extension-runtime-toast-label {
+  display: inline-block;
+  margin-right: 8px;
+  font-weight: 900;
+}
+
+.extension-runtime-toast--success {
+  border-color: #c7e7df;
+  background: #effcf8;
+  color: #0f766e;
+}
+
+.extension-runtime-toast--error {
+  border-color: rgba(225, 29, 72, 0.24);
+  background: #fff1f3;
+  color: #9f1239;
+}
+
+.extension-runtime-iframe {
+  width: 100%;
+  min-height: 420px;
+  height: 52vh;
+  border: 1px solid #e3e3e7;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
 @media (max-width: 980px) {
   .extension-install-grid,
-  .extension-meta-grid {
+  .extension-meta-grid,
+  .extension-feature-details {
     grid-template-columns: 1fr;
   }
 
-  .extension-meta-grid .extension-meta-wide {
+  .extension-meta-grid .extension-meta-wide,
+  .extension-feature-details-wide {
     grid-column: auto;
   }
 
-  .extension-card-header {
+  .extension-card-header,
+  .extension-feature-row-main {
     grid-template-columns: 1fr;
   }
 
-  .extension-enabled-toggle {
+  .extension-enabled-toggle,
+  .extension-feature-toggle,
+  .extension-card-actions,
+  .extension-feature-actions {
     justify-self: start;
   }
 }
