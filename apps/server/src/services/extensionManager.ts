@@ -555,6 +555,17 @@ function buildFeatureRuntimeUrl(extensionId: string, featureId: string, runnable
   return `/api/extensions/${encodeURIComponent(extensionId)}/runtime/${encodeURIComponent(featureId)}`;
 }
 
+function buildCompatRuntimeUrl(
+  extensionId: string,
+  extensionEnabled: boolean,
+  manifest: ExtensionManifestDto,
+): string | null {
+  if (!extensionEnabled || manifest.compatibility !== 'external' || !manifest.js) return null;
+  if (!isSafeFeatureEntryPath(manifest.js)) return null;
+  if (path.posix.extname(manifest.js).toLowerCase() !== '.js') return null;
+  return `/api/extensions/${encodeURIComponent(extensionId)}/compat-runtime`;
+}
+
 function buildCompatibilityNote(
   compatibility: ExtensionCompatibility,
   feature: ExtensionFeatureManifestDto,
@@ -924,6 +935,7 @@ function toInstalledExtensionDto(extension: InstalledExtension): Promise<Install
     sourceUrl: extension.sourceUrl,
     installedPath: extension.installedPath,
     ...(compatibility ? { compatibility } : {}),
+    compatRuntimeUrl: buildCompatRuntimeUrl(extension.id, extension.enabled, manifest),
     features,
     createdAt: extension.createdAt.toISOString(),
     updatedAt: extension.updatedAt.toISOString(),

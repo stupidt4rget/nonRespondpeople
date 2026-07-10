@@ -13,10 +13,9 @@ import { ExtensionRuntimePanel } from './ExtensionRuntimePanel';
 
 type InstallMode = 'zip' | 'git' | null;
 
-interface ActiveRuntime {
-  extensionId: string;
-  featureId: string;
-}
+type ActiveRuntime =
+  | { mode: 'native'; extensionId: string; featureId: string }
+  | { mode: 'sillytavern-compat'; extensionId: string };
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -71,8 +70,16 @@ export function ExtensionManagerPanel() {
   useEffect(() => {
     if (!activeRuntime) return;
     const extension = extensions.find((item) => item.id === activeRuntime.extensionId);
-    const feature = extension?.features.find((item) => item.id === activeRuntime.featureId);
-    if (!extension?.enabled || !feature?.enabled || !feature?.runnable) {
+    if (!extension?.enabled) {
+      setActiveRuntime(null);
+      return;
+    }
+    if (activeRuntime.mode === 'sillytavern-compat') {
+      if (!extension.compatRuntimeUrl) setActiveRuntime(null);
+      return;
+    }
+    const feature = extension.features.find((item) => item.id === activeRuntime.featureId);
+    if (!feature?.enabled || !feature.runnable) {
       setActiveRuntime(null);
     }
   }, [extensions, activeRuntime]);
@@ -196,7 +203,12 @@ export function ExtensionManagerPanel() {
     feature: ExtensionFeatureDto,
   ) => {
     if (!extension.enabled || !feature.enabled || !feature.runnable || !feature.runtimeUrl) return;
-    setActiveRuntime({ extensionId: extension.id, featureId: feature.id });
+    setActiveRuntime({ mode: 'native', extensionId: extension.id, featureId: feature.id });
+  };
+
+  const handleOpenCompatRuntime = (extension: InstalledExtensionDto) => {
+    if (!extension.enabled || !extension.compatRuntimeUrl) return;
+    setActiveRuntime({ mode: 'sillytavern-compat', extensionId: extension.id });
   };
 
   const handleDelete = async (extension: InstalledExtensionDto) => {
@@ -231,7 +243,8 @@ export function ExtensionManagerPanel() {
     ? extensions.find((item) => item.id === activeRuntime.extensionId) ?? null
     : null;
   const runtimeFeature = runtimeExtension
-    ? runtimeExtension.features.find((item) => item.id === activeRuntime?.featureId) ?? null
+    && activeRuntime?.mode === 'native'
+    ? runtimeExtension.features.find((item) => item.id === activeRuntime.featureId) ?? null
     : null;
 
   return (
@@ -306,8 +319,19 @@ export function ExtensionManagerPanel() {
       {error !== null && <p className="notice notice--error" role="alert">{error}</p>}
       {notice !== null && <p className="notice notice--success">{notice}</p>}
 
-      {runtimeExtension !== null && runtimeFeature !== null && (
+      {runtimeExtension !== null && activeRuntime?.mode === 'sillytavern-compat' && (
         <ExtensionRuntimePanel
+          key={`compat:${runtimeExtension.id}`}
+          mode="sillytavern-compat"
+          extension={runtimeExtension}
+          onClose={() => setActiveRuntime(null)}
+        />
+      )}
+
+      {runtimeExtension !== null && runtimeFeature !== null && activeRuntime?.mode === 'native' && (
+        <ExtensionRuntimePanel
+          key={`native:${runtimeExtension.id}:${runtimeFeature.id}`}
+          mode="native"
           extension={runtimeExtension}
           feature={runtimeFeature}
           onClose={() => setActiveRuntime(null)}
@@ -367,6 +391,16 @@ export function ExtensionManagerPanel() {
                       <p>{extension.description ?? '暂无扩展说明。'}</p>
                     </div>
                     <div className="extension-card-actions">
+                      {extension.compatRuntimeUrl !== null && (
+                        <button
+                          className="button button--secondary"
+                          type="button"
+                          disabled={deleting || updating || busy}
+                          onClick={() => handleOpenCompatRuntime(extension)}
+                        >
+                          实验性兼容运行
+                        </button>
+                      )}
                       <button
                         className="button button--secondary"
                         type="button"

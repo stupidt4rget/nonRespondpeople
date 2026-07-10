@@ -75,6 +75,7 @@ export interface InstalledExtensionDto {
   sourceUrl: string | null;
   installedPath: string;
   compatibility?: ExtensionCompatibility;
+  compatRuntimeUrl: string | null;
   features: ExtensionFeatureDto[];
   createdAt: string;
   updatedAt: string;

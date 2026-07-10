@@ -2337,6 +2337,55 @@ body {
   color: #9f1239;
 }
 
+.extension-runtime-panel--compat {
+  border-color: #d8d3f0;
+}
+
+.extension-compat-status {
+  margin: 0;
+}
+
+.extension-compat-status--ready,
+.extension-compat-status--saved {
+  border-color: #c7e7df;
+  background: #effcf8;
+  color: #0f766e;
+}
+
+.extension-compat-status--degraded,
+.extension-compat-status--error {
+  border-color: rgba(225, 29, 72, 0.24);
+  background: #fff1f3;
+  color: #9f1239;
+}
+
+.extension-compat-logs {
+  display: grid;
+  gap: 6px;
+  max-height: 140px;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid #e3e3e7;
+  border-radius: 8px;
+  background: #f8f8fa;
+  list-style: none;
+}
+
+.extension-compat-log {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  color: #52525b;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.extension-compat-log--warn,
+.extension-compat-log--error {
+  color: #9f1239;
+}
+
 .extension-runtime-iframe {
   width: 100%;
   min-height: 420px;
