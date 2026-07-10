@@ -131,3 +131,12 @@
 - Web: ChatPanel renders `<thinking>`/`<think>` blocks in a collapsible thinking area, shows timing metadata, provides assistant variant previous/next controls, and adds a read-only Prompt Preview panel. LLM settings form keeps the API key field blank with saved/not-set placeholders and adds explicit clear-key action.
 - Tooling: local pnpm v11 required a one-time `pnpm approve-builds --all` during verification for locked Prisma/esbuild/electron build scripts; no dependency versions were changed.
 - Verified: `pnpm typecheck`, `pnpm build`, and `pnpm build:desktop` passed after regenerating Prisma Client. Security scans passed: provider key-prefix scan no output; `LLM_API_KEY` only in README/settings/devlog; `Authorization`/`Bearer` only in chat request headers and docs.
+
+## 2026-07-10 - V0.14 character worldbook entry management
+- Reused the existing `CharacterWorldBook` relation and V0.13 `entriesJson` normalization/serialization path; no schema change and no migration were needed.
+- Added `POST /api/characters/:id/worldbook` to create and bind a character-owned worldbook. Existing conversations for that character receive the new default worldbook id so prompt generation can use it immediately.
+- Added strict API input validation for managed entry fields (booleans, strings, string arrays, trigger/insertion enums, and finite numbers). Existing normalization continues to clamp order/depth/probability, including probability to 0-100.
+- Added a collapsible Character WorldBook editor in CharacterDetail. It shows book/entry enabled counts and supports entry enable/disable, expand/edit, add, duplicate, delete, and persisted save for title, comment, content, keywords, trigger strategy, insertion position, order, depth, and probability.
+- PromptBuilder was left structurally unchanged because it already receives active character-bound worldbooks through the conversation path and applies V0.13 constant/keyword/selective trigger logic while skipping disabled entries.
+- Browser QA verified the collapsible section, existing-worldbook summary, entry rows, and expanded entry field set without mutating user data. A pre-existing Prompt Preview duplicate-key warning remains outside this change.
+- Verified: `git diff --check`, `pnpm typecheck`, `pnpm build`, and `pnpm build:desktop` passed. On this Windows sandbox, the two build commands required an unrestricted retry to recreate gitignored server `dist` files.
