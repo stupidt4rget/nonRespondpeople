@@ -22,10 +22,11 @@ import { PromptPresetsPanel } from './components/PromptPresetsPanel';
 import { CollapsibleSection } from './components/CollapsibleSection';
 import { WorldBookPanel } from './components/WorldBookPanel';
 import { UserPersonaPanel } from './components/UserPersonaPanel';
+import { ExtensionManagerPanel } from './components/ExtensionManagerPanel';
 import './App.css';
 
 type ConnectionState = 'checking' | 'connected' | 'error';
-type WorkspaceView = 'chat' | 'promptPresets';
+type WorkspaceView = 'chat' | 'promptPresets' | 'extensions';
 
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -333,6 +334,17 @@ export function App() {
 
             <button
               className={`workspace-nav-button${
+                workspaceView === 'extensions' ? ' workspace-nav-button--active' : ''
+              }`}
+              type="button"
+              onClick={() => setWorkspaceView('extensions')}
+            >
+              <span>扩展程序</span>
+              <small>安装与状态管理</small>
+            </button>
+
+            <button
+              className={`workspace-nav-button${
                 workspaceView === 'promptPresets' ? ' workspace-nav-button--active' : ''
               }`}
               type="button"
@@ -394,7 +406,9 @@ export function App() {
       </aside>
 
       <section className="app-workspace" aria-label="Character workspace">
-        {workspaceView === 'promptPresets' ? (
+        {workspaceView === 'extensions' ? (
+          <ExtensionManagerPanel />
+        ) : workspaceView === 'promptPresets' ? (
           <PromptPresetsPanel />
         ) : selected !== null ? (
           <ChatPanel

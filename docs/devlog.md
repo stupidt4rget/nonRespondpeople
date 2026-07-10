@@ -140,3 +140,16 @@
 - PromptBuilder was left structurally unchanged because it already receives active character-bound worldbooks through the conversation path and applies V0.13 constant/keyword/selective trigger logic while skipping disabled entries.
 - Browser QA verified the collapsible section, existing-worldbook summary, entry rows, and expanded entry field set without mutating user data. A pre-existing Prompt Preview duplicate-key warning remains outside this change.
 - Verified: `git diff --check`, `pnpm typecheck`, `pnpm build`, and `pnpm build:desktop` passed. On this Windows sandbox, the two build commands required an unrestricted retry to recreate gitignored server `dist` files.
+
+## 2026-07-10 - V0.15 extension manager + ZIP bomb hardening
+- Added `InstalledExtension` Prisma model and migration `20260710110000_add_extensions_v015` for extension metadata (id, displayName, version, sourceType, enabled, installedPath, manifestJson).
+- Server: new `extensionManager` service and `/api/extensions` routes for list, ZIP install, public HTTPS Git install, enable/disable toggle, and delete. ZIP path uses a custom `zipArchive` extractor; Git path uses shallow clone + `ls-tree`/`cat-file` materialization without `npm install` or manifest entry execution.
+- Web: new `ExtensionManagerPanel` workspace view with ZIP upload, Git URL install, installed list, enable toggle, and delete. Shared DTOs and API client helpers added in `@roleagent/shared` and `apps/web/src/api.ts`.
+- Security (ZIP bomb patch): `zipArchive.ts` now enforces limits on **actual decompressed output bytes** during Deflate inflation and stored entries, not only ZIP header `uncompressedSize`. Limits: 20 MB archive upload, 100 MB total unpacked, 25 MB per file, 2000 files. Exceeding limits throws frontend-visible errors, aborts extraction, and removes the partial temp directory before any DB write or final install path copy. Zip-slip, manifest validation, and Git manifest/path checks are unchanged.
+- Cleaned local V0.15 test artifacts under `data/v015-fixtures/`, `data/v015-manual/`, and `data/v015-no-git/` only; preserved `apps/server/prisma/dev.db` and other real user data.
+
+## 2026-07-10 - V0.15 manifest compatibility (RoleAgent + external/SillyTavern)
+- Added `normalizeExtensionManifest()` in `extensionManager.ts` so Git/ZIP installs can register extensions without a strict `manifest.id` or `type === "roleagent-extension"`.
+- ID derivation order: `id` → `packageName` → `name` → `display_name` / `displayName` → Git repo slug → package directory name; candidates are lowercased, sanitized to `[a-z0-9_-]`, and validated. Missing version defaults to `0.0.0` for management-only registration.
+- Compatibility: `type === "roleagent-extension"` → `roleagent`; otherwise `external`. Original `type` and `compatibility` are stored in `manifestJson`; list DTO exposes `compatibility` for UI badges. V0.15 still does not execute `entry` / `js` / `css` / `loading_order` paths—only validates they are safe relative paths.
+- User-facing errors updated for missing manifest, invalid JSON, underivable id, and duplicate install (409). No schema migration.
