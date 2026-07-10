@@ -17,6 +17,7 @@ import {
   readExtensionAssetFile,
   resolveExtensionAssetPath,
 } from '../services/extensionAssets.js';
+import { getExtensionCompatRuntime } from '../services/extensionCompatRuntime.js';
 import {
   deleteInstalledExtension,
   ExtensionManagerError,
@@ -212,6 +213,19 @@ export async function extensionRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
     try {
       return await getExtensionSettings(id);
+    } catch (error) {
+      return sendExtensionError(app, reply, error);
+    }
+  });
+
+  app.get('/api/extensions/:id/compat-runtime', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    try {
+      const runtime = await getExtensionCompatRuntime(id);
+      for (const [name, value] of Object.entries(runtime.headers)) {
+        reply.header(name, value);
+      }
+      return reply.send(runtime.html);
     } catch (error) {
       return sendExtensionError(app, reply, error);
     }
