@@ -13,19 +13,24 @@ import { ExtensionRuntimePanel } from './ExtensionRuntimePanel';
 
 type InstallMode = 'zip' | 'git' | null;
 
-interface ActiveRuntime {
-  extensionId: string;
-  featureId: string;
-}
+type ActiveRuntime =
+  | { mode: 'native'; extensionId: string; featureId: string }
+  | { mode: 'sillytavern-compat'; extensionId: string };
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function formatCompatibility(compatibility: InstalledExtensionDto['compatibility']): string {
-  if (compatibility === 'roleagent') return 'RoleAgent';
-  if (compatibility === 'external') return 'External';
-  return '未知';
+function compatBadgeClass(level: InstalledExtensionDto['compatibilityLevel']): string {
+  if (level === 'native') return 'extension-compat-badge extension-compat-badge--native';
+  if (level === 'L2') return 'extension-compat-badge extension-compat-badge--l2';
+  return 'extension-compat-badge extension-compat-badge--l0';
+}
+
+function compatBadgeLabel(extension: InstalledExtensionDto): string {
+  if (extension.compatibilityLevel === 'native') return 'RoleAgent Native';
+  if (extension.compatibilityLevel === 'L2') return 'L2 Experimental';
+  return 'L0 Display-only';
 }
 
 function formatDate(value: string): string {
@@ -71,8 +76,16 @@ export function ExtensionManagerPanel() {
   useEffect(() => {
     if (!activeRuntime) return;
     const extension = extensions.find((item) => item.id === activeRuntime.extensionId);
-    const feature = extension?.features.find((item) => item.id === activeRuntime.featureId);
-    if (!extension?.enabled || !feature?.enabled || !feature?.runnable) {
+    if (!extension?.enabled) {
+      setActiveRuntime(null);
+      return;
+    }
+    if (activeRuntime.mode === 'sillytavern-compat') {
+      if (!extension.compatRuntimeUrl) setActiveRuntime(null);
+      return;
+    }
+    const feature = extension.features.find((item) => item.id === activeRuntime.featureId);
+    if (!feature?.enabled || !feature.runnable) {
       setActiveRuntime(null);
     }
   }, [extensions, activeRuntime]);
@@ -196,7 +209,12 @@ export function ExtensionManagerPanel() {
     feature: ExtensionFeatureDto,
   ) => {
     if (!extension.enabled || !feature.enabled || !feature.runnable || !feature.runtimeUrl) return;
-    setActiveRuntime({ extensionId: extension.id, featureId: feature.id });
+    setActiveRuntime({ mode: 'native', extensionId: extension.id, featureId: feature.id });
+  };
+
+  const handleOpenCompatRuntime = (extension: InstalledExtensionDto) => {
+    if (!extension.enabled || !extension.compatRuntimeUrl) return;
+    setActiveRuntime({ mode: 'sillytavern-compat', extensionId: extension.id });
   };
 
   const handleDelete = async (extension: InstalledExtensionDto) => {
@@ -231,7 +249,8 @@ export function ExtensionManagerPanel() {
     ? extensions.find((item) => item.id === activeRuntime.extensionId) ?? null
     : null;
   const runtimeFeature = runtimeExtension
-    ? runtimeExtension.features.find((item) => item.id === activeRuntime?.featureId) ?? null
+    && activeRuntime?.mode === 'native'
+    ? runtimeExtension.features.find((item) => item.id === activeRuntime.featureId) ?? null
     : null;
 
   return (
@@ -306,8 +325,19 @@ export function ExtensionManagerPanel() {
       {error !== null && <p className="notice notice--error" role="alert">{error}</p>}
       {notice !== null && <p className="notice notice--success">{notice}</p>}
 
-      {runtimeExtension !== null && runtimeFeature !== null && (
+      {runtimeExtension !== null && activeRuntime?.mode === 'sillytavern-compat' && (
         <ExtensionRuntimePanel
+          key={`compat:${runtimeExtension.id}`}
+          mode="sillytavern-compat"
+          extension={runtimeExtension}
+          onClose={() => setActiveRuntime(null)}
+        />
+      )}
+
+      {runtimeExtension !== null && runtimeFeature !== null && activeRuntime?.mode === 'native' && (
+        <ExtensionRuntimePanel
+          key={`native:${runtimeExtension.id}:${runtimeFeature.id}`}
+          mode="native"
           extension={runtimeExtension}
           feature={runtimeFeature}
           onClose={() => setActiveRuntime(null)}
@@ -360,13 +390,23 @@ export function ExtensionManagerPanel() {
                         <span className="extension-source-badge">
                           {extension.sourceType === 'git' ? 'Git' : 'ZIP'}
                         </span>
-                        <span className="extension-source-badge extension-source-badge--compat">
-                          {formatCompatibility(extension.compatibility)}
+                        <span className={compatBadgeClass(extension.compatibilityLevel)}>
+                          {compatBadgeLabel(extension)}
                         </span>
                       </div>
                       <p>{extension.description ?? '暂无扩展说明。'}</p>
                     </div>
                     <div className="extension-card-actions">
+                      {extension.compatRuntimeUrl !== null && (
+                        <button
+                          className="button button--secondary"
+                          type="button"
+                          disabled={deleting || updating || busy}
+                          onClick={() => handleOpenCompatRuntime(extension)}
+                        >
+                          实验性兼容运行
+                        </button>
+                      )}
                       <button
                         className="button button--secondary"
                         type="button"
@@ -401,6 +441,48 @@ export function ExtensionManagerPanel() {
                       <dt>更新时间</dt><dd>{formatDate(extension.updatedAt)}</dd>
                     </div>
                   </dl>
+
+                  <div className="extension-compat-info">
+                    <p className="extension-compat-summary">
+                      {extension.compatibilitySummary}
+                    </p>
+
+                    {extension.compatibilityCapabilities.allowed.length > 0 && (
+                      <div className="extension-compat-capabilities">
+                        <p className="extension-compat-capabilities-title">已开放能力</p>
+                        <ul className="extension-compat-capabilities-list extension-compat-capabilities-list--allowed">
+                          {extension.compatibilityCapabilities.allowed.map((cap) => (
+                            <li key={cap} className="extension-compat-capability extension-compat-capability--allowed">
+                              {cap}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {extension.compatibilityCapabilities.unavailable.length > 0 && (
+                      <div className="extension-compat-capabilities">
+                        <p className="extension-compat-capabilities-title">未开放能力</p>
+                        <ul className="extension-compat-capabilities-list extension-compat-capabilities-list--unavailable">
+                          {extension.compatibilityCapabilities.unavailable.map((cap) => (
+                            <li key={cap} className="extension-compat-capability extension-compat-capability--unavailable">
+                              {cap}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {extension.compatibilityWarnings.length > 0 && (
+                      <ul className="extension-compat-warnings">
+                        {extension.compatibilityWarnings.map((warning) => (
+                          <li key={warning} className="extension-compat-warning">
+                            {warning}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
 
                   {expanded && (
                     <div className="extension-card-features">

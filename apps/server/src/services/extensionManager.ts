@@ -2,13 +2,19 @@ import type { InstalledExtension } from '@prisma/client';
 import type {
   DeleteExtensionResponse,
   ExtensionCompatibility,
+  ExtensionCompatibilityCapabilities,
+  ExtensionCompatibilityLevel,
   ExtensionFeatureCategory,
   ExtensionFeatureDto,
   ExtensionFeatureManifestDto,
   ExtensionFeatureRuntime,
   ExtensionManifestDto,
+  ExtensionSettings,
+  ExtensionSettingsResponse,
   ExtensionSourceType,
   InstalledExtensionDto,
+  JsonValue,
+  UpdateExtensionSettingsRequest,
 } from '@roleagent/shared';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -37,6 +43,8 @@ export const MAX_EXTENSION_MULTIPART_BYTES = MAX_EXTENSION_ZIP_BYTES + 1024 * 10
 export const MAX_EXTENSION_UNPACKED_BYTES = 100 * 1024 * 1024;
 export const MAX_EXTENSION_FILE_BYTES = 25 * 1024 * 1024;
 export const MAX_EXTENSION_FILE_COUNT = 2_000;
+export const MAX_EXTENSION_SETTINGS_BYTES = 256 * 1024;
+export const MAX_EXTENSION_SETTINGS_REQUEST_BYTES = 300 * 1024;
 
 const MAX_MANIFEST_BYTES = 64 * 1024;
 const MAX_GIT_CLONE_BYTES = 200 * 1024 * 1024;
@@ -45,6 +53,15 @@ const GIT_INSTALL_TIMEOUT_MS = 60_000;
 const EXTENSION_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const FEATURE_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const MAX_EXTENSION_FEATURES = 64;
+const MAX_EXTENSION_SETTINGS_DEPTH = 32;
+const MAX_EXTENSION_SETTINGS_NODES = 10_000;
+const MAX_EXTENSION_SETTINGS_STRING_BYTES = 64 * 1024;
+const MAX_EXTENSION_SETTINGS_KEY_CODE_POINTS = 256;
+const FORBIDDEN_EXTENSION_SETTINGS_KEYS = new Set([
+  '__proto__',
+  'prototype',
+  'constructor',
+]);
 
 const VALID_FEATURE_CATEGORIES = new Set<ExtensionFeatureCategory>([
   'render',
@@ -88,6 +105,273 @@ function isErrnoException(value: unknown): value is NodeJS.ErrnoException {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isStrictPlainObject(value: unknown): value is Record<string, unknown> {
+  if (!isPlainObject(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+type ExtensionSettingsValidationSource = 'request' | 'stored';
+
+interface ExtensionSettingsValidationState {
+  source: ExtensionSettingsValidationSource;
+  nodeCount: number;
+  ancestors: WeakSet<object>;
+}
+
+function extensionSettingsValidationError(
+  source: ExtensionSettingsValidationSource,
+  statusCode: number,
+  message: string,
+): never {
+  if (source === 'stored') {
+    return extensionError(500, 'Stored extension compatibility settings are invalid.');
+  }
+  return extensionError(statusCode, message);
+}
+
+function validateExtensionSettingsNodeCount(state: ExtensionSettingsValidationState): void {
+  state.nodeCount += 1;
+  if (state.nodeCount > MAX_EXTENSION_SETTINGS_NODES) {
+    extensionSettingsValidationError(
+      state.source,
+      400,
+      `settings must contain at most ${MAX_EXTENSION_SETTINGS_NODES} JSON values.`,
+    );
+  }
+}
+
+function normalizeExtensionSettingsValue(
+  value: unknown,
+  depth: number,
+  state: ExtensionSettingsValidationState,
+): JsonValue {
+  validateExtensionSettingsNodeCount(state);
+
+  if (value === null) return null;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      return extensionSettingsValidationError(
+        state.source,
+        400,
+        'settings numbers must be finite.',
+      );
+    }
+    return value;
+  }
+  if (typeof value === 'string') {
+    if (Buffer.byteLength(value, 'utf8') > MAX_EXTENSION_SETTINGS_STRING_BYTES) {
+      return extensionSettingsValidationError(
+        state.source,
+        400,
+        'settings strings must be no larger than 64 KiB.',
+      );
+    }
+    return value;
+  }
+  if (typeof value !== 'object') {
+    return extensionSettingsValidationError(
+      state.source,
+      400,
+      'settings must contain only JSON values.',
+    );
+  }
+  if (depth > MAX_EXTENSION_SETTINGS_DEPTH) {
+    return extensionSettingsValidationError(
+      state.source,
+      400,
+      `settings must not exceed ${MAX_EXTENSION_SETTINGS_DEPTH} levels of nesting.`,
+    );
+  }
+  if (state.ancestors.has(value)) {
+    return extensionSettingsValidationError(
+      state.source,
+      400,
+      'settings must not contain circular references.',
+    );
+  }
+
+  state.ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      if (Object.getPrototypeOf(value) !== Array.prototype) {
+        return extensionSettingsValidationError(
+          state.source,
+          400,
+          'settings must contain only plain JSON arrays.',
+        );
+      }
+      for (const key of Reflect.ownKeys(value)) {
+        if (key === 'length') continue;
+        if (typeof key !== 'string' || !/^(0|[1-9]\d*)$/.test(key)) {
+          return extensionSettingsValidationError(
+            state.source,
+            400,
+            'settings arrays must not contain custom properties.',
+          );
+        }
+        const index = Number(key);
+        if (!Number.isSafeInteger(index) || index >= value.length) {
+          return extensionSettingsValidationError(
+            state.source,
+            400,
+            'settings arrays contain an invalid index.',
+          );
+        }
+      }
+
+      const normalized: JsonValue[] = [];
+      for (let index = 0; index < value.length; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) {
+          return extensionSettingsValidationError(
+            state.source,
+            400,
+            'settings arrays must be dense JSON arrays.',
+          );
+        }
+        normalized.push(normalizeExtensionSettingsValue(descriptor.value, depth + 1, state));
+      }
+      return normalized;
+    }
+
+    if (!isStrictPlainObject(value)) {
+      return extensionSettingsValidationError(
+        state.source,
+        400,
+        'settings must contain only plain JSON objects.',
+      );
+    }
+
+    const normalized: Record<string, JsonValue> = Object.create(null) as Record<
+      string,
+      JsonValue
+    >;
+    for (const key of Reflect.ownKeys(value)) {
+      if (typeof key !== 'string') {
+        return extensionSettingsValidationError(
+          state.source,
+          400,
+          'settings objects must not contain symbol keys.',
+        );
+      }
+      if ([...key].length > MAX_EXTENSION_SETTINGS_KEY_CODE_POINTS) {
+        return extensionSettingsValidationError(
+          state.source,
+          400,
+          'settings keys must be at most 256 Unicode code points.',
+        );
+      }
+      if (FORBIDDEN_EXTENSION_SETTINGS_KEYS.has(key)) {
+        return extensionSettingsValidationError(
+          state.source,
+          400,
+          'settings contain a forbidden key.',
+        );
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) {
+        return extensionSettingsValidationError(
+          state.source,
+          400,
+          'settings must contain only enumerable JSON properties.',
+        );
+      }
+      normalized[key] = normalizeExtensionSettingsValue(descriptor.value, depth + 1, state);
+    }
+    return normalized;
+  } finally {
+    state.ancestors.delete(value);
+  }
+}
+
+function normalizeExtensionSettingsDocument(
+  value: unknown,
+  source: ExtensionSettingsValidationSource,
+): ExtensionSettings {
+  if (!isStrictPlainObject(value)) {
+    return extensionSettingsValidationError(source, 400, 'settings must be a JSON object.');
+  }
+
+  const normalized = normalizeExtensionSettingsValue(value, 0, {
+    source,
+    nodeCount: 0,
+    ancestors: new WeakSet<object>(),
+  });
+  if (!isStrictPlainObject(normalized)) {
+    return extensionSettingsValidationError(source, 400, 'settings must be a JSON object.');
+  }
+
+  const serialized = JSON.stringify(normalized);
+  if (Buffer.byteLength(serialized, 'utf8') > MAX_EXTENSION_SETTINGS_BYTES) {
+    return extensionSettingsValidationError(
+      source,
+      413,
+      'settings must be no larger than 256 KiB.',
+    );
+  }
+  return normalized as ExtensionSettings;
+}
+
+function normalizeUpdateExtensionSettingsRequest(
+  value: unknown,
+): UpdateExtensionSettingsRequest {
+  try {
+    if (!isStrictPlainObject(value)) {
+      return extensionError(400, 'request body must be a plain object');
+    }
+    const keys = Reflect.ownKeys(value);
+    if (keys.length !== 1 || keys[0] !== 'settings') {
+      return extensionError(400, 'settings must be the only field in the request body');
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(value, 'settings');
+    if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) {
+      return extensionError(400, 'settings must be an enumerable JSON value');
+    }
+    return {
+      settings: normalizeExtensionSettingsDocument(descriptor.value, 'request'),
+    };
+  } catch (error) {
+    if (error instanceof ExtensionManagerError) throw error;
+    return extensionError(400, 'request body must contain only plain JSON values');
+  }
+}
+
+function parseCompatSettingsJson(raw: string): ExtensionSettings {
+  if (Buffer.byteLength(raw, 'utf8') > MAX_EXTENSION_SETTINGS_BYTES) {
+    return extensionError(500, 'Stored extension compatibility settings are invalid.');
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return extensionError(500, 'Stored extension compatibility settings are invalid.');
+  }
+  return normalizeExtensionSettingsDocument(parsed, 'stored');
+}
+
+function isExtensionSettingsCompatibilityCandidate(extension: InstalledExtension): boolean {
+  try {
+    const parsed = JSON.parse(extension.manifestJson) as unknown;
+    return isPlainObject(parsed) && parsed.compatibility === 'external';
+  } catch {
+    return false;
+  }
+}
+
+function buildExtensionSettingsResponse(
+  extension: InstalledExtension,
+  settings: ExtensionSettings,
+): ExtensionSettingsResponse {
+  return {
+    extensionId: extension.id,
+    settings,
+    updatedAt: extension.updatedAt.toISOString(),
+  };
 }
 
 function isSafeExtensionId(value: string): boolean {
@@ -271,6 +555,91 @@ function computeFeatureRunnable(
 function buildFeatureRuntimeUrl(extensionId: string, featureId: string, runnable: boolean): string | null {
   if (!runnable) return null;
   return `/api/extensions/${encodeURIComponent(extensionId)}/runtime/${encodeURIComponent(featureId)}`;
+}
+
+function buildCompatRuntimeUrl(
+  extensionId: string,
+  extensionEnabled: boolean,
+  manifest: ExtensionManifestDto,
+): string | null {
+  if (!extensionEnabled || manifest.compatibility !== 'external' || !manifest.js) return null;
+  if (!isSafeFeatureEntryPath(manifest.js)) return null;
+  if (path.posix.extname(manifest.js).toLowerCase() !== '.js') return null;
+  return `/api/extensions/${encodeURIComponent(extensionId)}/compat-runtime`;
+}
+
+interface CompatibilityInfo {
+  level: ExtensionCompatibilityLevel;
+  label: string;
+  summary: string;
+  warnings: string[];
+  capabilities: ExtensionCompatibilityCapabilities;
+}
+
+const NATIVE_COMPATIBILITY_INFO: CompatibilityInfo = {
+  level: 'native',
+  label: 'RoleAgent Native',
+  summary: 'RoleAgent 原生扩展，在受控 iframe 中运行。',
+  warnings: [],
+  capabilities: {
+    allowed: ['native iframe runtime', 'feature toggles'],
+    unavailable: [],
+  },
+};
+
+const L2_COMPATIBILITY_INFO: CompatibilityInfo = {
+  level: 'L2',
+  label: 'SillyTavern Compatibility L2 Experimental',
+  summary:
+    '实验性兼容运行时，在隔离 iframe 中加载第三方脚本并提供扩展设置持久化。',
+  warnings: [
+    '实验性兼容，不代表完整 SillyTavern Extension API',
+    '第三方脚本仅在 sandbox iframe 中运行',
+    '禁用扩展会阻止启动 compatibility runtime，但不会清空设置',
+  ],
+  capabilities: {
+    allowed: [
+      'isolated iframe script',
+      'extension_settings read/write',
+      'saveSettingsDebounced',
+    ],
+    unavailable: [
+      'no main-page injection',
+      'no allow-same-origin',
+      'no getRequestHeaders/auth proxy',
+      'no event bus',
+      'no slash commands',
+      'no chat/character/worldbook/persona full access',
+      'no prompt/generation hooks',
+    ],
+  },
+};
+
+const L0_COMPATIBILITY_INFO: CompatibilityInfo = {
+  level: 'L0',
+  label: 'External Display-only L0',
+  summary: '外部扩展，仅显示 manifest 信息，不执行第三方脚本。',
+  warnings: [
+    '第三方脚本不会被执行',
+    '仅显示 JS/CSS 条目信息',
+  ],
+  capabilities: {
+    allowed: ['manifest display'],
+    unavailable: [
+      'no script execution',
+      'no extension_settings',
+      'no main-page injection',
+    ],
+  },
+};
+
+function buildCompatibilityInfo(
+  compatibility: ExtensionCompatibility,
+  compatRuntimeUrl: string | null,
+): CompatibilityInfo {
+  if (compatibility === 'roleagent') return NATIVE_COMPATIBILITY_INFO;
+  if (compatRuntimeUrl !== null) return L2_COMPATIBILITY_INFO;
+  return L0_COMPATIBILITY_INFO;
 }
 
 function buildCompatibilityNote(
@@ -630,22 +999,32 @@ function toInstalledExtensionDto(extension: InstalledExtension): Promise<Install
   const { manifest, rawParsed } = parseStoredManifest(extension);
   const compatibility = manifest.compatibility;
 
-  return buildExtensionFeatureDtos(extension, manifest, rawParsed ?? undefined).then((features) => ({
-    id: extension.id,
-    displayName: extension.displayName,
-    packageName: extension.packageName,
-    version: extension.version,
-    author: extension.author,
-    description: extension.description,
-    enabled: extension.enabled,
-    sourceType: extension.sourceType === 'git' ? 'git' : 'zip',
-    sourceUrl: extension.sourceUrl,
-    installedPath: extension.installedPath,
-    ...(compatibility ? { compatibility } : {}),
-    features,
-    createdAt: extension.createdAt.toISOString(),
-    updatedAt: extension.updatedAt.toISOString(),
-  }));
+  return buildExtensionFeatureDtos(extension, manifest, rawParsed ?? undefined).then((features) => {
+    const compatRuntimeUrl = buildCompatRuntimeUrl(extension.id, extension.enabled, manifest);
+    const compatInfo = buildCompatibilityInfo(compatibility, compatRuntimeUrl);
+    return {
+      id: extension.id,
+      displayName: extension.displayName,
+      packageName: extension.packageName,
+      version: extension.version,
+      author: extension.author,
+      description: extension.description,
+      enabled: extension.enabled,
+      sourceType: extension.sourceType === 'git' ? 'git' : 'zip',
+      sourceUrl: extension.sourceUrl,
+      installedPath: extension.installedPath,
+      ...(compatibility ? { compatibility } : {}),
+      compatRuntimeUrl,
+      compatibilityLevel: compatInfo.level,
+      compatibilityLabel: compatInfo.label,
+      compatibilitySummary: compatInfo.summary,
+      compatibilityWarnings: compatInfo.warnings,
+      compatibilityCapabilities: compatInfo.capabilities,
+      features,
+      createdAt: extension.createdAt.toISOString(),
+      updatedAt: extension.updatedAt.toISOString(),
+    };
+  });
 }
 
 function optionalNonEmptyString(value: unknown): string | undefined {
@@ -1739,6 +2118,37 @@ export async function getInstalledExtensionRuntime(
     extensionRoot: resolveInstalledDirectory(existing.installedPath),
     entryRelativePath: feature.entry,
   };
+}
+
+export async function getExtensionSettings(
+  extensionId: string,
+): Promise<ExtensionSettingsResponse> {
+  const existing = await prisma.installedExtension.findUnique({ where: { id: extensionId } });
+  if (!existing) return extensionError(404, 'Extension not found.');
+
+  const settings = parseCompatSettingsJson(existing.compatSettingsJson);
+  return buildExtensionSettingsResponse(existing, settings);
+}
+
+export async function updateExtensionSettings(
+  extensionId: string,
+  request: unknown,
+): Promise<ExtensionSettingsResponse> {
+  const existing = await prisma.installedExtension.findUnique({ where: { id: extensionId } });
+  if (!existing) return extensionError(404, 'Extension not found.');
+  if (!existing.enabled) return extensionError(403, 'Extension is disabled.');
+  if (!isExtensionSettingsCompatibilityCandidate(existing)) {
+    return extensionError(409, 'Extension is not a compatibility runtime candidate.');
+  }
+
+  const normalized = normalizeUpdateExtensionSettingsRequest(request);
+  const updated = await prisma.installedExtension.update({
+    where: { id: extensionId },
+    data: {
+      compatSettingsJson: JSON.stringify(normalized.settings),
+    },
+  });
+  return buildExtensionSettingsResponse(updated, normalized.settings);
 }
 
 export async function updateExtensionEnabled(

@@ -48,6 +48,8 @@
   DeleteUserPersonaResponse,
   UpdateConversationUserPersonaRequest,
   InstalledExtensionDto,
+  ExtensionSettings,
+  ExtensionSettingsResponse,
   ExtensionsResponse,
   InstallExtensionFromZipResponse,
   InstallExtensionFromGitRequest,
@@ -152,6 +154,36 @@ export async function fetchExtensions(): Promise<InstalledExtensionDto[]> {
   }
   const data = (await res.json()) as ExtensionsResponse;
   return data.extensions;
+}
+
+export async function getExtensionSettings(
+  extensionId: string,
+): Promise<ExtensionSettingsResponse> {
+  const res = await fetch(
+    `/api/extensions/${encodeURIComponent(extensionId)}/settings`,
+  );
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as ExtensionSettingsResponse;
+}
+
+export async function updateExtensionSettings(
+  extensionId: string,
+  settings: ExtensionSettings,
+): Promise<ExtensionSettingsResponse> {
+  const res = await fetch(
+    `/api/extensions/${encodeURIComponent(extensionId)}/settings`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings }),
+    },
+  );
+  if (!res.ok) {
+    return throwApiError(res);
+  }
+  return (await res.json()) as ExtensionSettingsResponse;
 }
 
 export async function installExtensionZip(

@@ -17,18 +17,22 @@ import {
   readExtensionAssetFile,
   resolveExtensionAssetPath,
 } from '../services/extensionAssets.js';
+import { getExtensionCompatRuntime } from '../services/extensionCompatRuntime.js';
 import {
   deleteInstalledExtension,
   ExtensionManagerError,
+  getExtensionSettings,
   getInstalledExtensionForAssets,
   getInstalledExtensionRuntime,
   installExtensionFromGit,
   installExtensionFromZip,
   listInstalledExtensions,
   MAX_EXTENSION_MULTIPART_BYTES,
+  MAX_EXTENSION_SETTINGS_REQUEST_BYTES,
   MAX_EXTENSION_ZIP_BYTES,
   updateExtensionEnabled,
   updateExtensionFeatureEnabled,
+  updateExtensionSettings,
 } from '../services/extensionManager.js';
 
 interface UploadedZip {
@@ -167,6 +171,29 @@ function applyExtensionAssetHeaders(reply: FastifyReply): void {
   reply.header('Cache-Control', 'no-store');
 }
 
+function getErrorStatusCode(error: unknown): number | null {
+  if (error === null || typeof error !== 'object') return null;
+  const statusCode = (error as { statusCode?: unknown }).statusCode;
+  return typeof statusCode === 'number' ? statusCode : null;
+}
+
+function sendExtensionSettingsBodyError(
+  app: FastifyInstance,
+  reply: FastifyReply,
+  error: unknown,
+): void {
+  const statusCode = getErrorStatusCode(error);
+  if (statusCode !== null && statusCode >= 400 && statusCode < 500) {
+    const message =
+      statusCode === 413
+        ? 'Extension settings request is too large.'
+        : 'Invalid extension settings request body.';
+    void reply.code(statusCode).send({ error: message });
+    return;
+  }
+  void sendExtensionError(app, reply, error);
+}
+
 export async function extensionRoutes(app: FastifyInstance) {
   app.addContentTypeParser(
     'multipart/form-data',
@@ -181,6 +208,29 @@ export async function extensionRoutes(app: FastifyInstance) {
     return body;
   });
 
+  app.get('/api/extensions/:id/settings', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const { id } = request.params as { id: string };
+    try {
+      return await getExtensionSettings(id);
+    } catch (error) {
+      return sendExtensionError(app, reply, error);
+    }
+  });
+
+  app.get('/api/extensions/:id/compat-runtime', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    try {
+      const runtime = await getExtensionCompatRuntime(id);
+      for (const [name, value] of Object.entries(runtime.headers)) {
+        reply.header(name, value);
+      }
+      return reply.send(runtime.html);
+    } catch (error) {
+      return sendExtensionError(app, reply, error);
+    }
+  });
+
   app.get('/api/extensions/:id/assets/*', async (request, reply) => {
     try {
       const params = request.params as { id: string; '*': string };
@@ -192,6 +242,10 @@ export async function extensionRoutes(app: FastifyInstance) {
       const resolvedPath = await resolveExtensionAssetPath(extensionRoot, assetPath);
       const content = await readExtensionAssetFile(resolvedPath);
       applyExtensionAssetHeaders(reply);
+      if (request.headers.origin === 'null') {
+        reply.header('Access-Control-Allow-Origin', 'null');
+        reply.header('Vary', 'Origin');
+      }
       return reply
         .type(getExtensionAssetContentType(resolvedPath))
         .send(content);
@@ -268,6 +322,25 @@ export async function extensionRoutes(app: FastifyInstance) {
       return sendExtensionError(app, reply, error);
     }
   });
+
+  app.patch(
+    '/api/extensions/:id/settings',
+    {
+      bodyLimit: MAX_EXTENSION_SETTINGS_REQUEST_BYTES,
+      errorHandler(error, _request, reply) {
+        sendExtensionSettingsBodyError(app, reply, error);
+      },
+    },
+    async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      const { id } = request.params as { id: string };
+      try {
+        return await updateExtensionSettings(id, request.body);
+      } catch (error) {
+        return sendExtensionError(app, reply, error);
+      }
+    },
+  );
 
   app.patch('/api/extensions/:id/features/:featureId', async (request, reply) => {
     const { id, featureId } = request.params as { id: string; featureId: string };

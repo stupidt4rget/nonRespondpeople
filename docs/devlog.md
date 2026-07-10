@@ -166,3 +166,64 @@
 - External / SillyTavern manifests remain partially compatible only: when no RoleAgent `features` and no safe iframe entry exist, `js`/`css` paths are surfaced as display-only candidates (`runnable=false`, compatibility notes, toggles persist but nothing executes). External JS/CSS is not injected into the main page and SillyTavern Extension API is not implemented. Planned follow-up: V0.17 SillyTavern Extension Compatibility Bridge.
 - Verified on branch `feature/extension-runtime-v0.16`: `git diff --check`, `pnpm typecheck`, and `pnpm build` passed.
 - Still before merge to `dev`: browser manual test with a RoleAgent runtime ZIP, external display-only regression (e.g. JS-Slash-Runner), `pnpm build:desktop`, and post-merge smoke test on `dev`.
+
+## 2026-07-11 - V0.17 SillyTavern Extension Compatibility Bridge
+
+### Overview
+
+V0.17 adds a SillyTavern Extension Compatibility Bridge on top of V0.16's Extension Manager, feature toggles, and controlled assets/runtime API. The goal is to let external/SillyTavern-style extensions mount a settings UI in an isolated iframe and persist their own JSON settings, without polluting the React main page or exposing sensitive APIs.
+
+Compatibility levels: **L0** (install/display-only), **L1** (isolated settings UI in sandbox iframe), **L2** (extension settings persistence). RoleAgent native extensions remain labeled `RoleAgent Native`.
+
+### Commits
+
+| Commit | Description |
+| --- | --- |
+| `916f5a3` | feat: add extension compatibility settings API v0.17 - `compatSettingsJson` column + migration, GET/PATCH `/api/extensions/:id/settings`, recursive JSON validation (256 KiB, depth 32, 10k nodes, prototype key rejection) |
+| `2d5e2dc` | feat: add extension compatibility runtime shell v0.17 - `/compat-runtime` route, bridge shell HTML with `#extensions_settings`, fake `extension_settings` / `saveSettingsDebounced` / `SillyTavern.getContext()`, postMessage protocol, CSP `script-src 'self' 'nonce-...'` |
+| `e331d0d` | feat: add extension compatibility runtime host v0.17 - React `CompatExtensionRuntimePanel` with session handshake, settings read/write, log/status display, L2 experimental notice |
+| `fe8663c` | feat: show extension compatibility levels v0.17 - DTO compatibility badges/labels/summaries/warnings/capabilities, `ExtensionManagerPanel` UI, `ExtensionRuntimePanel` notice, CSS |
+| `8fa59fcc` | fix: serve extension js assets with module-safe mime v0.17 - CORS `Access-Control-Allow-Origin: null` for sandbox iframe opaque origin, `.mjs` support |
+
+### L1/L2 Implementation
+
+- **L1**: Compatibility iframe with `sandbox="allow-scripts"` (no `allow-same-origin`), server-generated bridge shell HTML, `#extensions_settings` mount point, fake SillyTavern environment (`extension_settings`, `saveSettingsDebounced`, `SillyTavern.getContext()`).
+- **L2**: Per-extension `compatSettingsJson` in SQLite, GET/PATCH settings API, 500ms debounce save via postMessage, close/reopen/refresh readback verified.
+- **postMessage protocol**: `shell-ready` -> `init` -> `runtime-ready` / `save-settings` / `save-result` / `status` / `log` / `shutdown`, with session id, protocol version, strict DTO validation, size/rate limits.
+
+### Fixture Smoke
+
+Internal L2 fixture (`compat-l2-fixture.zip`, created outside repo) verified:
+- Install ZIP 201, enable 200, GET settings 200, GET compat-runtime 200, GET assets 200.
+- iframe UI rendered, three capabilities (getContext / extension_settings / saveSettingsDebounced) available.
+- PATCH settings 200, close/reopen readback passed, refresh/reopen readback passed.
+- Full results in `docs/sillytavern-extension-bridge-v017-smoke.md`.
+
+### CORS/MIME Fix
+
+Module script (`<script type="module">`) always fetches with CORS mode. Sandbox iframe has opaque origin -> sends `Origin: null`. Server returned 200 but no CORS header -> browser blocked response -> "Declared extension module failed to load." Fix: return `Access-Control-Allow-Origin: null` + `Vary: Origin` when `Origin: null`. Also added `.mjs` to allowed extensions and content type. MIME type itself was already correct (`text/javascript; charset=utf-8`).
+
+### JS-Slash-Runner Status
+
+**Degraded / display-only.** V0.17 does not pursue running JS-Slash-Runner's five tabs. Blockers: 25 static ESM imports to SillyTavern modules (FATAL), missing jQuery (FATAL), CDN script injection blocked by CSP (FATAL), `fetch('/version')` blocked by CSP (FATAL), `eventSource`/`event_types` missing (DEGRADED), `SlashCommandParser` missing (DEGRADED), chat/worldbook/prompt/generation APIs missing (DEGRADED). V0.17 does not add jQuery, import map, module shim, or L3-L5 capabilities to pursue surface-level success.
+
+### Unimplemented Capabilities (Security Boundary)
+
+- No main-page injection of third-party JS/CSS.
+- iframe `sandbox="allow-scripts"` only, no `allow-same-origin`.
+- No `getRequestHeaders` / auth proxy / CSRF token / API key access.
+- No event bus (`eventSource` / `event_types`).
+- No slash command (`SlashCommandParser`).
+- No chat / character / worldbook / persona full access.
+- No prompt / generation hooks.
+- No arbitrary filesystem / database / network access.
+- Settings only write to current `InstalledExtension.compatSettingsJson`.
+
+### Verification
+
+```
+git diff --check   -> pass
+pnpm typecheck     -> pass
+pnpm build         -> pass
+pnpm build:desktop -> pass
+```

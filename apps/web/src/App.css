@@ -2057,6 +2057,102 @@ body {
   font-weight: 900;
 }
 
+.extension-compat-badge {
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.extension-compat-badge--native {
+  border: 1px solid #c7e7df;
+  background: #effcf8;
+  color: #0f766e;
+}
+
+.extension-compat-badge--l2 {
+  border: 1px solid #d8d3f0;
+  background: #f5f3ff;
+  color: #6d28d9;
+}
+
+.extension-compat-badge--l0 {
+  border: 1px solid #dedee3;
+  background: #f4f4f5;
+  color: #6e6e73;
+}
+
+.extension-compat-info {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.extension-compat-summary {
+  margin: 0;
+  color: #52525b;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.extension-compat-capabilities {
+  display: grid;
+  gap: 4px;
+}
+
+.extension-compat-capabilities-title {
+  margin: 0;
+  color: #8e8e93;
+  font-size: 0.7rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.extension-compat-capabilities-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.extension-compat-capability {
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.extension-compat-capability--allowed {
+  border: 1px solid #c7e7df;
+  background: #effcf8;
+  color: #0f766e;
+}
+
+.extension-compat-capability--unavailable {
+  border: 1px solid #f0d4d4;
+  background: #fef2f2;
+  color: #9f1239;
+}
+
+.extension-compat-warnings {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.extension-compat-warning {
+  border-left: 3px solid #d97706;
+  padding: 4px 10px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
 .extension-meta-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2334,6 +2430,78 @@ body {
 .extension-runtime-toast--error {
   border-color: rgba(225, 29, 72, 0.24);
   background: #fff1f3;
+  color: #9f1239;
+}
+
+.extension-runtime-panel--compat {
+  border-color: #d8d3f0;
+}
+
+.extension-compat-runtime-notice {
+  border: 1px solid #d8d3f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #f5f3ff;
+  color: #4c1d95;
+}
+
+.extension-compat-runtime-notice p {
+  margin: 0 0 6px;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.extension-compat-runtime-notice ul {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.extension-compat-status {
+  margin: 0;
+}
+
+.extension-compat-status--ready,
+.extension-compat-status--saved {
+  border-color: #c7e7df;
+  background: #effcf8;
+  color: #0f766e;
+}
+
+.extension-compat-status--degraded,
+.extension-compat-status--error {
+  border-color: rgba(225, 29, 72, 0.24);
+  background: #fff1f3;
+  color: #9f1239;
+}
+
+.extension-compat-logs {
+  display: grid;
+  gap: 6px;
+  max-height: 140px;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid #e3e3e7;
+  border-radius: 8px;
+  background: #f8f8fa;
+  list-style: none;
+}
+
+.extension-compat-log {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  color: #52525b;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.extension-compat-log--warn,
+.extension-compat-log--error {
   color: #9f1239;
 }
 
