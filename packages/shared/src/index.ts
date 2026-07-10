@@ -14,6 +14,13 @@ export type ExtensionSourceType = 'zip' | 'git';
 
 export type ExtensionCompatibility = 'roleagent' | 'external';
 
+export type ExtensionCompatibilityLevel = 'native' | 'L0' | 'L1' | 'L2';
+
+export interface ExtensionCompatibilityCapabilities {
+  allowed: string[];
+  unavailable: string[];
+}
+
 export type ExtensionFeatureCategory =
   | 'render'
   | 'script'
@@ -76,6 +83,11 @@ export interface InstalledExtensionDto {
   installedPath: string;
   compatibility?: ExtensionCompatibility;
   compatRuntimeUrl: string | null;
+  compatibilityLevel: ExtensionCompatibilityLevel;
+  compatibilityLabel: string;
+  compatibilitySummary: string;
+  compatibilityWarnings: string[];
+  compatibilityCapabilities: ExtensionCompatibilityCapabilities;
   features: ExtensionFeatureDto[];
   createdAt: string;
   updatedAt: string;

@@ -606,6 +606,16 @@ function CompatExtensionRuntimePanel({
         </button>
       </header>
 
+      <div className="extension-compat-runtime-notice" role="alert">
+        <p>
+          <strong>L2 Experimental</strong>
+        </p>
+        <ul>
+          <li>Only extension_settings/saveSettingsDebounced are bridged</li>
+          <li>No chat/worldbook/prompt/generation access</li>
+        </ul>
+      </div>
+
       <p
         className={`notice extension-compat-status extension-compat-status--${runtimeStatus}`}
         role="status"

@@ -2,6 +2,8 @@ import type { InstalledExtension } from '@prisma/client';
 import type {
   DeleteExtensionResponse,
   ExtensionCompatibility,
+  ExtensionCompatibilityCapabilities,
+  ExtensionCompatibilityLevel,
   ExtensionFeatureCategory,
   ExtensionFeatureDto,
   ExtensionFeatureManifestDto,
@@ -566,6 +568,80 @@ function buildCompatRuntimeUrl(
   return `/api/extensions/${encodeURIComponent(extensionId)}/compat-runtime`;
 }
 
+interface CompatibilityInfo {
+  level: ExtensionCompatibilityLevel;
+  label: string;
+  summary: string;
+  warnings: string[];
+  capabilities: ExtensionCompatibilityCapabilities;
+}
+
+const NATIVE_COMPATIBILITY_INFO: CompatibilityInfo = {
+  level: 'native',
+  label: 'RoleAgent Native',
+  summary: 'RoleAgent 原生扩展，在受控 iframe 中运行。',
+  warnings: [],
+  capabilities: {
+    allowed: ['native iframe runtime', 'feature toggles'],
+    unavailable: [],
+  },
+};
+
+const L2_COMPATIBILITY_INFO: CompatibilityInfo = {
+  level: 'L2',
+  label: 'SillyTavern Compatibility L2 Experimental',
+  summary:
+    '实验性兼容运行时，在隔离 iframe 中加载第三方脚本并提供扩展设置持久化。',
+  warnings: [
+    '实验性兼容，不代表完整 SillyTavern Extension API',
+    '第三方脚本仅在 sandbox iframe 中运行',
+    '禁用扩展会阻止启动 compatibility runtime，但不会清空设置',
+  ],
+  capabilities: {
+    allowed: [
+      'isolated iframe script',
+      'extension_settings read/write',
+      'saveSettingsDebounced',
+    ],
+    unavailable: [
+      'no main-page injection',
+      'no allow-same-origin',
+      'no getRequestHeaders/auth proxy',
+      'no event bus',
+      'no slash commands',
+      'no chat/character/worldbook/persona full access',
+      'no prompt/generation hooks',
+    ],
+  },
+};
+
+const L0_COMPATIBILITY_INFO: CompatibilityInfo = {
+  level: 'L0',
+  label: 'External Display-only L0',
+  summary: '外部扩展，仅显示 manifest 信息，不执行第三方脚本。',
+  warnings: [
+    '第三方脚本不会被执行',
+    '仅显示 JS/CSS 条目信息',
+  ],
+  capabilities: {
+    allowed: ['manifest display'],
+    unavailable: [
+      'no script execution',
+      'no extension_settings',
+      'no main-page injection',
+    ],
+  },
+};
+
+function buildCompatibilityInfo(
+  compatibility: ExtensionCompatibility,
+  compatRuntimeUrl: string | null,
+): CompatibilityInfo {
+  if (compatibility === 'roleagent') return NATIVE_COMPATIBILITY_INFO;
+  if (compatRuntimeUrl !== null) return L2_COMPATIBILITY_INFO;
+  return L0_COMPATIBILITY_INFO;
+}
+
 function buildCompatibilityNote(
   compatibility: ExtensionCompatibility,
   feature: ExtensionFeatureManifestDto,
@@ -923,23 +999,32 @@ function toInstalledExtensionDto(extension: InstalledExtension): Promise<Install
   const { manifest, rawParsed } = parseStoredManifest(extension);
   const compatibility = manifest.compatibility;
 
-  return buildExtensionFeatureDtos(extension, manifest, rawParsed ?? undefined).then((features) => ({
-    id: extension.id,
-    displayName: extension.displayName,
-    packageName: extension.packageName,
-    version: extension.version,
-    author: extension.author,
-    description: extension.description,
-    enabled: extension.enabled,
-    sourceType: extension.sourceType === 'git' ? 'git' : 'zip',
-    sourceUrl: extension.sourceUrl,
-    installedPath: extension.installedPath,
-    ...(compatibility ? { compatibility } : {}),
-    compatRuntimeUrl: buildCompatRuntimeUrl(extension.id, extension.enabled, manifest),
-    features,
-    createdAt: extension.createdAt.toISOString(),
-    updatedAt: extension.updatedAt.toISOString(),
-  }));
+  return buildExtensionFeatureDtos(extension, manifest, rawParsed ?? undefined).then((features) => {
+    const compatRuntimeUrl = buildCompatRuntimeUrl(extension.id, extension.enabled, manifest);
+    const compatInfo = buildCompatibilityInfo(compatibility, compatRuntimeUrl);
+    return {
+      id: extension.id,
+      displayName: extension.displayName,
+      packageName: extension.packageName,
+      version: extension.version,
+      author: extension.author,
+      description: extension.description,
+      enabled: extension.enabled,
+      sourceType: extension.sourceType === 'git' ? 'git' : 'zip',
+      sourceUrl: extension.sourceUrl,
+      installedPath: extension.installedPath,
+      ...(compatibility ? { compatibility } : {}),
+      compatRuntimeUrl,
+      compatibilityLevel: compatInfo.level,
+      compatibilityLabel: compatInfo.label,
+      compatibilitySummary: compatInfo.summary,
+      compatibilityWarnings: compatInfo.warnings,
+      compatibilityCapabilities: compatInfo.capabilities,
+      features,
+      createdAt: extension.createdAt.toISOString(),
+      updatedAt: extension.updatedAt.toISOString(),
+    };
+  });
 }
 
 function optionalNonEmptyString(value: unknown): string | undefined {

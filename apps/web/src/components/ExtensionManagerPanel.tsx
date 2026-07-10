@@ -21,10 +21,16 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function formatCompatibility(compatibility: InstalledExtensionDto['compatibility']): string {
-  if (compatibility === 'roleagent') return 'RoleAgent';
-  if (compatibility === 'external') return 'External';
-  return '未知';
+function compatBadgeClass(level: InstalledExtensionDto['compatibilityLevel']): string {
+  if (level === 'native') return 'extension-compat-badge extension-compat-badge--native';
+  if (level === 'L2') return 'extension-compat-badge extension-compat-badge--l2';
+  return 'extension-compat-badge extension-compat-badge--l0';
+}
+
+function compatBadgeLabel(extension: InstalledExtensionDto): string {
+  if (extension.compatibilityLevel === 'native') return 'RoleAgent Native';
+  if (extension.compatibilityLevel === 'L2') return 'L2 Experimental';
+  return 'L0 Display-only';
 }
 
 function formatDate(value: string): string {
@@ -384,8 +390,8 @@ export function ExtensionManagerPanel() {
                         <span className="extension-source-badge">
                           {extension.sourceType === 'git' ? 'Git' : 'ZIP'}
                         </span>
-                        <span className="extension-source-badge extension-source-badge--compat">
-                          {formatCompatibility(extension.compatibility)}
+                        <span className={compatBadgeClass(extension.compatibilityLevel)}>
+                          {compatBadgeLabel(extension)}
                         </span>
                       </div>
                       <p>{extension.description ?? '暂无扩展说明。'}</p>
@@ -435,6 +441,48 @@ export function ExtensionManagerPanel() {
                       <dt>更新时间</dt><dd>{formatDate(extension.updatedAt)}</dd>
                     </div>
                   </dl>
+
+                  <div className="extension-compat-info">
+                    <p className="extension-compat-summary">
+                      {extension.compatibilitySummary}
+                    </p>
+
+                    {extension.compatibilityCapabilities.allowed.length > 0 && (
+                      <div className="extension-compat-capabilities">
+                        <p className="extension-compat-capabilities-title">已开放能力</p>
+                        <ul className="extension-compat-capabilities-list extension-compat-capabilities-list--allowed">
+                          {extension.compatibilityCapabilities.allowed.map((cap) => (
+                            <li key={cap} className="extension-compat-capability extension-compat-capability--allowed">
+                              {cap}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {extension.compatibilityCapabilities.unavailable.length > 0 && (
+                      <div className="extension-compat-capabilities">
+                        <p className="extension-compat-capabilities-title">未开放能力</p>
+                        <ul className="extension-compat-capabilities-list extension-compat-capabilities-list--unavailable">
+                          {extension.compatibilityCapabilities.unavailable.map((cap) => (
+                            <li key={cap} className="extension-compat-capability extension-compat-capability--unavailable">
+                              {cap}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {extension.compatibilityWarnings.length > 0 && (
+                      <ul className="extension-compat-warnings">
+                        {extension.compatibilityWarnings.map((warning) => (
+                          <li key={warning} className="extension-compat-warning">
+                            {warning}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
 
                   {expanded && (
                     <div className="extension-card-features">
