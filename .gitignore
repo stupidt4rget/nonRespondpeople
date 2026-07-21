@@ -14,3 +14,4 @@ data/
 coverage/
 dist-ssr/
 .env.*.local
+*.exe
