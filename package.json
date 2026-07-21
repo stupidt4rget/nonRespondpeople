@@ -1,0 +1,17 @@
+{
+  "name": "roleagent-tavern",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "pnpm --filter @roleagent/shared build && pnpm -r --parallel --filter @roleagent/web --filter @roleagent/server run dev",
+    "build": "pnpm --filter @roleagent/shared build && pnpm -r --filter @roleagent/web --filter @roleagent/server run build",
+    "typecheck": "pnpm --filter @roleagent/shared build && pnpm -r --filter @roleagent/shared --filter @roleagent/web --filter @roleagent/server run typecheck",
+    "dev:desktop": "pnpm --filter @roleagent/shared build && node apps/desktop/scripts/generate-prisma.mjs && pnpm --filter @roleagent/server build && pnpm --filter @roleagent/desktop build && pnpm --filter @roleagent/desktop dev",
+    "build:desktop": "pnpm --filter @roleagent/shared build && node apps/desktop/scripts/generate-prisma.mjs && pnpm --filter @roleagent/server build && pnpm --filter @roleagent/web build && pnpm --filter @roleagent/desktop build",
+    "package:desktop": "pnpm build:desktop && pnpm --filter @roleagent/desktop package"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

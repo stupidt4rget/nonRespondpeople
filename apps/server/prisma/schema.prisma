@@ -1,0 +1,217 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Character {
+  id                      String   @id @default(cuid())
+  name                    String
+  description             String?
+  persona                 String?
+  personality             String?
+  scenario                String?
+  firstMessage            String?
+  messageExample          String?
+  systemPrompt            String?
+  postHistoryInstructions String?
+  rawCardJson             String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  worldBookLinks CharacterWorldBook[]
+  conversations  Conversation[]
+}
+
+model WorldBook {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  entriesJson String
+  rawJson     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  characterLinks CharacterWorldBook[]
+}
+
+model CharacterWorldBook {
+  id          String   @id @default(cuid())
+  characterId String
+  worldBookId String
+  isDefault   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  worldBook WorldBook @relation(fields: [worldBookId], references: [id], onDelete: Cascade)
+
+  @@unique([characterId, worldBookId])
+  @@index([worldBookId])
+}
+
+model Conversation {
+  id                    String   @id @default(cuid())
+  characterId           String
+  title                 String?
+  activeWorldBookIdsJson String?
+  userPersonaId         String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  character   Character      @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  userPersona UserPersona?   @relation(fields: [userPersonaId], references: [id], onDelete: SetNull)
+  messages    ChatMessage[]
+
+  @@index([characterId])
+  @@index([userPersonaId])
+}
+
+model UserPersona {
+  id          String   @id @default(cuid())
+  name        String
+  description String
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  conversations Conversation[]
+
+  @@index([enabled])
+  @@index([updatedAt])
+}
+
+model ChatMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String
+  content        String
+  thinkingContent String?
+  rawContent      String?
+  timingJson      String?
+  promptDebugJson String?
+  selectedVariantId String?
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  variants     AssistantMessageVariant[]
+
+  @@index([conversationId, createdAt])
+}
+
+model AssistantMessageVariant {
+  id                     String   @id @default(cuid())
+  messageId              String
+  content                String
+  thinkingContent        String?
+  rawContent             String?
+  timingJson             String?
+  generationSettingsJson String?
+  createdAt              DateTime @default(now())
+
+  message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId, createdAt])
+}
+
+model PromptSettings {
+  id                   String   @id
+  roleplayPreset       String
+  userPersona          String?
+  authorsNote          String?
+  userName             String
+  maxPromptChars       Int
+  historyBudgetChars   Int
+  worldBookBudgetChars Int
+  worldBookScanDepth   Int
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+model GenerationSettings {
+  id                   String   @id
+  contextUnlockEnabled Boolean  @default(false)
+  contextLimitTokens   Int      @default(200000)
+  maxReplyTokens       Int      @default(65536)
+  responseCount        Int      @default(1)
+  streamEnabled        Boolean  @default(true)
+  visibleThinkingEnabled Boolean @default(true)
+  temperature          Float    @default(1)
+  frequencyPenalty     Float    @default(0)
+  presencePenalty      Float    @default(0)
+  topP                 Float    @default(1)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+model LlmSettings {
+  id        String   @id
+  baseUrl   String
+  model     String
+  apiKey    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PromptPreset {
+  id                String   @id @default(cuid())
+  name              String
+  sourceType        String
+  isActive          Boolean  @default(false)
+  importedAt        DateTime?
+  warningsJson      String?
+  ignoredFieldsJson String?
+  originalFileName  String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  entries PromptPresetEntry[]
+
+  @@index([isActive])
+  @@index([updatedAt])
+}
+
+model PromptPresetEntry {
+  id                String   @id @default(cuid())
+  presetId          String
+  identifier        String?
+  name              String
+  role              String
+  enabled           Boolean  @default(true)
+  content           String
+  orderIndex        Int
+  marker            Boolean  @default(false)
+  injectionPosition String?
+  injectionDepth    Int?
+  injectionOrder    Int?
+  rawMetadataJson   String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  preset PromptPreset @relation(fields: [presetId], references: [id], onDelete: Cascade)
+
+  @@index([presetId, orderIndex])
+}
+
+model InstalledExtension {
+  id                  String   @id
+  displayName         String
+  packageName         String   @unique
+  version             String
+  author              String?
+  description         String?
+  enabled             Boolean  @default(false)
+  sourceType          String   @default("zip")
+  sourceUrl           String?
+  manifestJson        String
+  featureSettingsJson String   @default("{}")
+  compatSettingsJson  String   @default("{}")
+  installedPath       String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([enabled])
+  @@index([updatedAt])
+}
